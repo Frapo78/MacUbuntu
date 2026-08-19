@@ -98,6 +98,18 @@ class Engine:
             profile["version"] = __version__
             self.store.save(state, __version__)
 
+        # The celebratory success event is deliberately emitted only after the
+        # final profile receipt has been persisted.  A failed state write must
+        # never show a misleading 100%/success message.
+        if progress:
+            progress({
+                "event": "complete",
+                "index": total,
+                "total": total,
+                "module": "complete",
+                "title": "MacUbuntu complete",
+            })
+
         return {
             "ok": True,
             "dry_run": dry_run,
