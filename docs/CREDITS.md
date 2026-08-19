@@ -4,7 +4,7 @@
 
 **Idea and implementation / Idea e realizzazione: Francesco Poltero.**
 
-MacUbuntu is an integration and configuration project. The software listed below is created and maintained by its respective owners and contributors. MacUbuntu is grateful to them and does not claim ownership of their work.
+MacUbuntu is an integration and configuration project. The software and creative assets listed below are created and maintained by their respective owners and contributors. MacUbuntu is grateful to them and does not claim ownership of their work.
 
 This page describes components MacUbuntu may install or manage. Upstream licenses, trademarks, copyright notices and project policies remain authoritative.
 
@@ -29,16 +29,21 @@ Thank you to Canonical, Ubuntu maintainers and Debian/Ubuntu package maintainers
 
 ## Appearance
 
-### Vince Liuice and WhiteSur contributors
+### Vince Liuice and MacTahoe / WhiteSur contributors
 
-MacUbuntu's default deep appearance uses the WhiteSur family from **Vince Liuice (`vinceliuice`) and contributors**.
+A major part of MacUbuntu's visual transformation is possible thanks to **Vince Liuice (`vinceliuice`) and contributors**.
 
-- WhiteSur GTK Theme: https://github.com/vinceliuice/WhiteSur-gtk-theme — upstream MIT license
+MacUbuntu v0.5 uses the MacTahoe GTK/Shell project as its current Tahoe-inspired window and Shell layer, while retaining the mature WhiteSur icon/cursor layer and compatibility with assets MacUbuntu v0.4 already managed.
+
+- MacTahoe GTK Theme: https://github.com/vinceliuice/MacTahoe-gtk-theme — upstream MIT license
+- WhiteSur GTK Theme: https://github.com/vinceliuice/WhiteSur-gtk-theme — upstream MIT license; legacy v0.4 managed appearance
 - WhiteSur Icon Theme: https://github.com/vinceliuice/WhiteSur-icon-theme — upstream GPL-3.0 license
 - WhiteSur Cursors: https://github.com/vinceliuice/WhiteSur-cursors — upstream GPL-3.0 license
 - WhiteSur Wallpapers: https://github.com/vinceliuice/WhiteSur-wallpapers — upstream MIT license
 
-MacUbuntu uses isolated `MacUbuntu-*` install names and deliberately does not enable WhiteSur's libadwaita `~/.config/gtk-4.0` overwrite path by default.
+Thank you also for the open-source mac-inspired wallpaper artwork distributed with the WhiteSur and MacTahoe projects. MacUbuntu v0.5 uses pinned WhiteSur/Monterey-inspired assets and MacTahoe day/night assets instead of redistributing proprietary Apple wallpaper files.
+
+MacUbuntu uses isolated `MacUbuntu-*` install names and deliberately does not enable the upstream libadwaita `~/.config/gtk-4.0` overwrite path, GDM replacement or Firefox rewrite by default.
 
 ### Inter
 
@@ -98,7 +103,7 @@ Thank you to **Oleksandr Gornostal and Ulauncher contributors**.
 - https://github.com/Ulauncher/Ulauncher
 - https://launchpad.net/~agornostal/+archive/ubuntu/ulauncher
 
-MacUbuntu selects the stable v5 channel rather than a pre-release development line.
+MacUbuntu selects the stable v5 channel and manages the launcher service/autostart only when needed for persistent Spotlight-like access.
 
 ## Local sharing
 
@@ -109,7 +114,7 @@ Thank you to the **Linux Mint team and Warpinator contributors** for a mature op
 - https://github.com/linuxmint/warpinator
 - https://flathub.org/apps/org.x.Warpinator
 
-MacUbuntu installs the verified Flathub build when needed. Warpinator remains an independent Linux Mint project. MacUbuntu does not auto-enable insecure sharing behavior; users should select a private group code in Warpinator to enable its secure mode.
+MacUbuntu installs the verified Flathub build when needed. Warpinator remains an independent Linux Mint project. MacUbuntu does not auto-enable insecure sharing behavior or force the interactive application to open at every login.
 
 ## Phone integration
 
@@ -141,3 +146,5 @@ Thank you to Ubuntu/Debian maintainers, Launchpad and Flathub contributors. MacU
 ## Trademark and affiliation notice
 
 Credits are acknowledgement, not endorsement. MacUbuntu is not affiliated with the upstream projects listed here unless explicitly stated by those projects. Apple, macOS and Mac are trademarks of Apple Inc.; Ubuntu is a trademark of Canonical Ltd. All third-party names and marks belong to their respective owners.
+
+MacUbuntu does not redistribute proprietary Apple operating-system assets, fonts or wallpaper files.
