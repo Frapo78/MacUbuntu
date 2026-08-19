@@ -25,9 +25,15 @@ class CLITests(unittest.TestCase):
     def test_help(self):
         cp = self.run_cli("--help")
         self.assertEqual(cp.returncode, 0)
+        self.assertIn("doctor", cp.stdout)
         self.assertIn("macify", cp.stdout)
         self.assertIn("update", cp.stdout)
         self.assertIn("uninstall", cp.stdout)
+
+    def test_doctor_help_is_localized(self):
+        cp = self.run_cli("doctor", "--lang", "it", "--help")
+        self.assertEqual(cp.returncode, 0)
+        self.assertIn("verifica che MacUbuntu", cp.stdout)
 
     def test_update_help_is_localized(self):
         cp = self.run_cli("update", "--lang", "it", "--help")
@@ -76,7 +82,7 @@ class CLITests(unittest.TestCase):
     def test_version(self):
         cp = self.run_cli("--version")
         self.assertEqual(cp.returncode, 0)
-        self.assertIn("0.2.0", cp.stdout)
+        self.assertIn("0.3.0", cp.stdout)
 
 
 if __name__ == "__main__":
