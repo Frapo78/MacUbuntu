@@ -42,6 +42,38 @@ class ExternalSafetyTests(unittest.TestCase):
             with self.assertRaises(ExternalOperationError):
                 _safe_extract(archive, root / "out", resource="test")
 
+    def test_archive_member_limit_is_enforced(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            archive = root / "members.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                for index in range(3):
+                    zf.writestr(f"root/file-{index}", "ok")
+            with self.assertRaises(ExternalOperationError) as ctx:
+                _safe_extract(archive, root / "out", resource="test", max_members=2)
+            self.assertEqual(ctx.exception.code, "archive_too_many_files")
+
+    def test_component_specific_archive_member_limit_can_be_raised(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            archive = root / "members.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                for index in range(3):
+                    zf.writestr(f"root/file-{index}", "ok")
+            out = root / "out"
+            _safe_extract(archive, out, resource="test", max_members=3)
+            self.assertEqual((out / "root" / "file-2").read_text(encoding="utf-8"), "ok")
+
+    def test_archive_member_limit_has_a_hard_ceiling(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            archive = root / "empty.zip"
+            with zipfile.ZipFile(archive, "w"):
+                pass
+            with self.assertRaises(ExternalOperationError) as ctx:
+                _safe_extract(archive, root / "out", resource="test", max_members=100001)
+            self.assertEqual(ctx.exception.code, "archive_limit_invalid")
+
     def test_internal_relative_symlink_is_preserved(self):
         """Models the relative SVG symlinks used by the pinned WhiteSur source."""
         with tempfile.TemporaryDirectory() as td:
