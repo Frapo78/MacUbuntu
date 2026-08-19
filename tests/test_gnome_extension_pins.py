@@ -1,6 +1,8 @@
 import unittest
 
 from macubuntu_app.external_gnome import EGO_REVIEW_DOWNLOAD
+from macubuntu_app.modules.gestures_x11 import GesturesX11Module
+from macubuntu_app.modules.phone_integration import PhoneIntegrationModule
 from macubuntu_app.modules.shell_extensions import ShellExtensionsModule
 
 
@@ -21,6 +23,9 @@ class GnomeExtensionPinTests(unittest.TestCase):
                 f"https://extensions.gnome.org/review/download/{review_id}.shell-extension.zip",
             )
 
+        self.assertEqual(GesturesX11Module.PINS["46"], {"version": 25, "review_id": 63139})
+        self.assertEqual(PhoneIntegrationModule.GS_PINS["46"], {"version": 72, "review_id": 70399})
+
     def test_gnome42_extension_versions_and_reviews_are_pinned(self):
         expected = {
             "blur-my-shell@aunetx": (47, 42627),
@@ -31,6 +36,9 @@ class GnomeExtensionPinTests(unittest.TestCase):
             pin = ShellExtensionsModule.EXTENSIONS[uuid]["42"]
             self.assertEqual(pin["version"], version)
             self.assertEqual(pin["review_id"], review_id)
+
+        self.assertEqual(GesturesX11Module.PINS["42"], {"version": 17, "review_id": 41094})
+        self.assertEqual(PhoneIntegrationModule.GS_PINS["42"], {"version": 68, "review_id": 66552})
 
 
 if __name__ == "__main__":
