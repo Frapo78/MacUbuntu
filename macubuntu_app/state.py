@@ -24,6 +24,10 @@ class StateReadError(StateError):
     code = "state_read_error"
 
 
+class StateWriteError(StateError):
+    code = "state_write_error"
+
+
 class StateCorruptError(StateError):
     code = "state_corrupt"
 
@@ -147,14 +151,18 @@ class StateStore:
         out["updated_at"] = now_iso()
         out = _validate_state(out, path=self.path)
 
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        if self.path.exists():
-            # Never overwrite an unreadable state file. A broken receipt is safer
-            # than silently replacing ownership history with incomplete data.
-            self._read_path(self.path)
-            shutil.copy2(self.path, self.backup_path)
-
-        atomic_json_write(self.path, out)
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            if self.path.exists():
+                # Never overwrite an unreadable state file. A broken receipt is safer
+                # than silently replacing ownership history with incomplete data.
+                self._read_path(self.path)
+                shutil.copy2(self.path, self.backup_path)
+            atomic_json_write(self.path, out)
+        except StateError:
+            raise
+        except OSError as exc:
+            raise StateWriteError(str(exc), path=self.path) from exc
 
     def remove_if_empty(self, state: dict[str, Any]) -> None:
         if state.get("operations"):
@@ -166,3 +174,5 @@ class StateStore:
                 path.unlink()
             except FileNotFoundError:
                 pass
+            except OSError as exc:
+                raise StateWriteError(str(exc), path=path) from exc
