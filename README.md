@@ -12,10 +12,11 @@ The project is deliberately more than a theme installer. Its goal is to provide 
 - configure GNOME in a mac-style, module by module;
 - keep a receipt of every managed mutation;
 - detect configuration drift;
+- update itself safely from the official GitHub repository;
 - report its state in concise human-readable or stable JSON form;
 - undo only what MacUbuntu actually changed.
 
-> **Status: alpha / v0.1 foundation.** The reversible core is usable now. Appearance, gestures, launcher, sharing and device-integration modules are being moved into the same transaction model instead of being shipped as unrelated shell scripts.
+> **Status: alpha / v0.2 foundation.** The reversible core and safe self-update path are usable now. Appearance, gestures, launcher, sharing and device-integration modules are being moved into the same transaction model instead of being shipped as unrelated shell scripts.
 
 ## Quick start
 
@@ -41,6 +42,20 @@ To see the current MacUbuntu profile, whether the system is converged and what M
 ./macubuntu status
 ```
 
+To update MacUbuntu itself from the official repository:
+
+```bash
+./macubuntu update
+```
+
+Check for an update without applying it:
+
+```bash
+./macubuntu update --check
+```
+
+The updater only performs a clean fast-forward of the official `main` branch. It refuses dirty worktrees, forks, development branches, locally-ahead histories and divergence rather than overwriting user work. See [`docs/UPDATE.md`](docs/UPDATE.md).
+
 To restore the recorded pre-MacUbuntu state:
 
 ```bash
@@ -62,11 +77,12 @@ The default terminal interface is intentionally short and understandable without
 ./macubuntu status --lang en
 ```
 
-Technical identifiers, GSettings schemas, before/after values, state paths and individual operation results are hidden from normal output. Show them explicitly with:
+Technical identifiers, GSettings schemas, before/after values, state paths, Git commits and individual operation results are hidden from normal output. Show them explicitly with:
 
 ```bash
 ./macubuntu status --verbose
 ./macubuntu plan --verbose
+./macubuntu update --verbose
 ./macubuntu macify --yes --verbose
 ```
 
@@ -86,6 +102,7 @@ Once the repository is cloned, the main entry point is always `./macubuntu`. No 
 For an unattended run by an automation or AI agent:
 
 ```bash
+./macubuntu update --check --json
 ./macubuntu audit --json
 ./macubuntu plan --json
 ./macubuntu macify --yes --json
@@ -103,6 +120,7 @@ The JSON interface uses stable machine-oriented status/action fields. Human tran
 | `apply` | Apply supported mac-style modules |
 | `macify` | Audit, plan and apply in one autonomous run |
 | `status` | Show profile state, convergence and operations actually owned by MacUbuntu |
+| `update` | Safely check/apply a fast-forward update from the official GitHub repository |
 | `uninstall` | Restore recorded settings and safely remove packages installed by MacUbuntu |
 
 Global options:
@@ -115,6 +133,20 @@ Global options:
 --version          show the MacUbuntu version
 ```
 
+`update` additionally supports:
+
+```text
+--check            fetch update metadata and report availability without changing source files
+```
+
+For `update`, `--dry-run` is equivalent to `--check`.
+
+## Safe self-update
+
+`./macubuntu update` is intentionally conservative. It validates that the program is running from a Git checkout whose `origin` points to `Frapo78/MacUbuntu`, requires a clean `main` branch, fetches `origin/main`, and only applies the update when Git proves that a fast-forward is possible.
+
+It never uses `git reset --hard`, never silently discards local files and never force-updates forks or development branches. After a successful update the files on disk are current; the next invocation automatically runs the newly downloaded code.
+
 ## Profile state vs ownership
 
 MacUbuntu deliberately separates two concepts:
@@ -124,7 +156,7 @@ MacUbuntu deliberately separates two concepts:
 
 A machine can be fully converged with zero owned operations. This happens when the desired packages and settings already existed before MacUbuntu ran. MacUbuntu does not claim ownership of those pre-existing choices and will not remove them during uninstall.
 
-## What v0.1 configures
+## What v0.2 configures
 
 The first module, `core.gnome`, intentionally uses Ubuntu/GNOME components before adding external projects. It currently manages:
 
@@ -179,13 +211,14 @@ The architecture is intentionally module-based so support for newer Ubuntu/GNOME
 
 Read [`AGENTS.md`](AGENTS.md). The short version is:
 
-1. run `./macubuntu audit --json`;
-2. run `./macubuntu plan --json`;
-3. inspect the plan and support level;
-4. run `./macubuntu macify --yes --json` only when appropriate;
-5. never edit `state.json` manually;
-6. use `status` and `uninstall` rather than guessing what was changed;
-7. never parse the localized human output when JSON is available.
+1. optionally run `./macubuntu update --check --json` and inspect `data.status`;
+2. run `./macubuntu audit --json`;
+3. run `./macubuntu plan --json`;
+4. inspect the plan and support level;
+5. run `./macubuntu macify --yes --json` only when appropriate;
+6. never edit `state.json` manually;
+7. use `status` and `uninstall` rather than guessing what was changed;
+8. never parse the localized human output when JSON is available.
 
 ## Design principles
 
@@ -197,6 +230,7 @@ Read [`AGENTS.md`](AGENTS.md). The short version is:
 6. **No opaque mega-script.** A one-command UX may orchestrate many modules, but each module remains independently diagnosable.
 7. **Human-first terminal UX.** Normal output is concise and localized; internals are opt-in with `--verbose`.
 8. **Agent-friendly output.** Important decisions are available as structured, language-independent JSON.
+9. **Safe self-update.** Updating the application must never require destructive Git operations.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the internal model.
 
