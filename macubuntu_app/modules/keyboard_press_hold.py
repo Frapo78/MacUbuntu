@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..external import apply_managed_text_file, apply_pinned_subdir_copy
+from ..external import apply_managed_text_file
 from ..operations import apply_apt_bundle, apply_gsetting
 from ..state import StateStore
 from ..system import gsettings_get
@@ -17,18 +17,17 @@ from .common import package_available, package_change, path_change
 class PressHoldAccentsModule:
     """Add a macOS-like press-and-hold accent picker through IBus.
 
-    The implementation is pinned to press2accent's IBus engine. IBus is the
-    desktop input-method layer, so this avoids X11-only key injection and works
-    with Wayland applications. The user's original GNOME input sources are
-    preserved and remain available as an immediate fallback.
+    MacUbuntu owns the small IBus engine installed by this module. IBus is the
+    desktop input-method layer, so the feature works without X11-only key
+    injection and has a viable path on both X11 and Wayland. Existing GNOME
+    input sources are preserved as immediate fallbacks and are restored by the
+    normal GSettings receipts on uninstall.
     """
 
     id = "keyboard.press-hold-accents"
     title = "press-and-hold accent picker"
 
-    REPOSITORY = "dresnite/press2accent"
-    COMMIT = "5a1c3a5da3c2129c304f17d9bf70451d221206ec"
-    ENGINE_NAME = "press2accent"
+    ENGINE_NAME = "macubuntu-accents"
     INPUT_SOURCE = ("ibus", ENGINE_NAME)
 
     @property
@@ -40,8 +39,12 @@ class PressHoldAccentsModule:
         return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 
     @property
-    def engine_dir(self) -> Path:
-        return self.data_home / "macubuntu" / "press2accent" / "ibus"
+    def source_engine_file(self) -> Path:
+        return Path(__file__).resolve().parents[1] / "assets" / "macubuntu_accent_engine.py"
+
+    @property
+    def engine_file(self) -> Path:
+        return self.data_home / "macubuntu" / "input" / "macubuntu_accent_engine.py"
 
     @property
     def component_dir(self) -> Path:
@@ -49,7 +52,7 @@ class PressHoldAccentsModule:
 
     @property
     def component_file(self) -> Path:
-        return self.component_dir / "macubuntu-press2accent.xml"
+        return self.component_dir / "macubuntu-accents.xml"
 
     @property
     def environment_file(self) -> Path:
@@ -76,39 +79,52 @@ class PressHoldAccentsModule:
             result.append((str(item[0]), str(item[1])))
         return result
 
+    @classmethod
+    def _merge_source_lists(
+        cls,
+        sources: list[tuple[str, str]],
+        mru: list[tuple[str, str]] | None,
+    ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+        merged_sources = list(sources)
+        if cls.INPUT_SOURCE not in merged_sources:
+            merged_sources.append(cls.INPUT_SOURCE)
+        merged_mru = list(mru) if mru is not None else list(merged_sources)
+        merged_mru = [cls.INPUT_SOURCE] + [source for source in merged_mru if source != cls.INPUT_SOURCE]
+        # Keep every configured source reachable even if GNOME's MRU list was
+        # incomplete before MacUbuntu touched it.
+        for source in merged_sources:
+            if source not in merged_mru:
+                merged_mru.append(source)
+        return merged_sources, merged_mru
+
     def _desired_sources(self, runner: Runner) -> tuple[str | None, str | None]:
         raw_sources = gsettings_get(runner, "org.gnome.desktop.input-sources", "sources")
         sources = self._parse_sources(raw_sources)
         if sources is None:
             return None, None
-        if self.INPUT_SOURCE not in sources:
-            sources.append(self.INPUT_SOURCE)
-
         raw_mru = gsettings_get(runner, "org.gnome.desktop.input-sources", "mru-sources")
         mru = self._parse_sources(raw_mru)
-        if mru is None:
-            mru = list(sources)
-        mru = [self.INPUT_SOURCE] + [source for source in mru if source != self.INPUT_SOURCE]
+        sources, mru = self._merge_source_lists(sources, mru)
         return repr(sources), repr(mru)
 
     def _component_xml(self) -> str:
-        engine = self.engine_dir / "engine.py"
+        engine = self.engine_file
         return f'''<?xml version="1.0" encoding="UTF-8"?>
 <component>
-  <name>org.freedesktop.IBus.MacUbuntuPress2Accent</name>
+  <name>org.freedesktop.IBus.MacUbuntuAccents</name>
   <description>MacUbuntu press-and-hold accent input method</description>
   <exec>python3 {engine} --ibus</exec>
   <version>0.6.0</version>
-  <author>press2accent contributors; integrated by MacUbuntu</author>
+  <author>Francesco Poltero and MacUbuntu contributors</author>
   <license>MIT</license>
-  <homepage>https://github.com/dresnite/press2accent</homepage>
-  <textdomain>press2accent</textdomain>
+  <homepage>https://github.com/Frapo78/MacUbuntu</homepage>
+  <textdomain>macubuntu</textdomain>
   <engines>
     <engine>
       <name>{self.ENGINE_NAME}</name>
       <language>en</language>
       <license>MIT</license>
-      <author>press2accent contributors</author>
+      <author>Francesco Poltero and MacUbuntu contributors</author>
       <icon>ibus-keyboard</icon>
       <layout>default</layout>
       <longname>MacUbuntu Accents</longname>
@@ -134,7 +150,7 @@ class PressHoldAccentsModule:
         packages = self._packages(runner)
         changes = [package_change(runner, package, self.id) for package in packages]
         changes.extend([
-            path_change(self.id, "press2accent IBus engine", self.engine_dir),
+            path_change(self.id, "MacUbuntu accent engine", self.engine_file),
             path_change(self.id, "MacUbuntu IBus component", self.component_file),
             path_change(self.id, "MacUbuntu IBus environment", self.environment_file),
         ])
@@ -226,7 +242,8 @@ class PressHoldAccentsModule:
     ) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
         packages = self._packages(runner)
-        if not {"ibus", "python3-gi", "gir1.2-ibus-1.0"}.issubset(set(packages)):
+        required = {"ibus", "python3-gi", "gir1.2-ibus-1.0"}
+        if not required.issubset(set(packages)):
             results.append({
                 "kind": "ibus_engine",
                 "resource": self.ENGINE_NAME,
@@ -244,46 +261,69 @@ class PressHoldAccentsModule:
             dry_run=dry_run,
         ))
 
-        source_result = apply_pinned_subdir_copy(
-            store=store,
-            state=state,
-            app_version=app_version,
-            resource="press2accent-ibus-source",
-            repository=self.REPOSITORY,
-            commit=self.COMMIT,
-            subdir="ibus",
-            destination=self.engine_dir,
-            dry_run=dry_run,
-        )
-        results.append(source_result)
-        if source_result.get("status") in {"skipped", "kept"}:
+        try:
+            engine_content = self.source_engine_file.read_text(encoding="utf-8")
+        except OSError as exc:
             results.append({
                 "kind": "ibus_engine",
                 "resource": self.ENGINE_NAME,
                 "status": "skipped",
-                "reason": "unmanaged_or_drifted_engine_path",
+                "reason": "bundled_engine_missing",
+                "error": str(exc),
             })
             return results
 
-        component_path = self._component_path_value()
-        results.append(apply_managed_text_file(
-            store=store,
-            state=state,
-            app_version=app_version,
-            resource="press2accent-component",
-            path=self.component_file,
-            content=self._component_xml(),
-            dry_run=dry_run,
-        ))
-        results.append(apply_managed_text_file(
-            store=store,
-            state=state,
-            app_version=app_version,
-            resource="press2accent-environment",
-            path=self.environment_file,
-            content=f"IBUS_COMPONENT_PATH={component_path}\n",
-            dry_run=dry_run,
-        ))
+        asset_results = [
+            apply_managed_text_file(
+                store=store,
+                state=state,
+                app_version=app_version,
+                resource="macubuntu-accent-engine",
+                path=self.engine_file,
+                content=engine_content,
+                mode=0o755,
+                dry_run=dry_run,
+            ),
+            apply_managed_text_file(
+                store=store,
+                state=state,
+                app_version=app_version,
+                resource="macubuntu-accent-component",
+                path=self.component_file,
+                content=self._component_xml(),
+                dry_run=dry_run,
+            ),
+            apply_managed_text_file(
+                store=store,
+                state=state,
+                app_version=app_version,
+                resource="macubuntu-ibus-environment",
+                path=self.environment_file,
+                content=f"IBUS_COMPONENT_PATH={self._component_path_value()}\n",
+                dry_run=dry_run,
+            ),
+        ]
+        results.extend(asset_results)
+        if any(result.get("status") in {"skipped", "kept"} for result in asset_results):
+            results.append({
+                "kind": "ibus_engine",
+                "resource": self.ENGINE_NAME,
+                "status": "skipped",
+                "reason": "unmanaged_or_drifted_engine_files",
+            })
+            return results
+
+        if not dry_run:
+            self_test = runner.run(["python3", str(self.engine_file), "--self-test"], check=False)
+            if self_test.returncode != 0:
+                results.append({
+                    "kind": "ibus_engine",
+                    "resource": self.ENGINE_NAME,
+                    "status": "skipped",
+                    "reason": "engine_self_test_failed",
+                    "stderr": self_test.stderr or "",
+                })
+                return results
 
         desired_sources, desired_mru = self._desired_sources(runner)
         if desired_sources is None or desired_mru is None:
