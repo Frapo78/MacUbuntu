@@ -81,7 +81,7 @@ class CLITests(unittest.TestCase):
     def test_version(self):
         cp = self.run_cli("--version")
         self.assertEqual(cp.returncode, 0)
-        self.assertIn("0.5.1", cp.stdout)
+        self.assertIn("0.6.0", cp.stdout)
 
 
 if __name__ == "__main__":
