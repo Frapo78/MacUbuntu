@@ -278,7 +278,8 @@ def _print_global_error(data: dict[str, Any], t: Translator, verbose: bool) -> N
     if data.get("status") == "busy":
         print(f"! {t('busy')}")
     elif data.get("status") == "state_error":
-        print(f"! {t(f\"state_error_{data.get('code', 'state_error')}\")}")
+        key = f"state_error_{data.get('code', 'state_error')}"
+        print(f"! {t(key)}")
     else:
         print("! MacUbuntu error")
     if verbose:
@@ -326,10 +327,7 @@ def main(argv: list[str] | None = None) -> int:
                     if args.command == "macify"
                     else (lambda: engine.apply(dry_run=args.dry_run))
                 )
-                if args.dry_run:
-                    data = operation()
-                else:
-                    data = _run_locked(args.command, operation)
+                data = operation() if args.dry_run else _run_locked(args.command, operation)
                 data["doctor"] = preflight
         elif args.command == "update":
             operation = lambda: update_checkout(
@@ -337,10 +335,7 @@ def main(argv: list[str] | None = None) -> int:
                 root,
                 check_only=bool(args.check or args.dry_run),
             )
-            if args.check or args.dry_run:
-                data = operation()
-            else:
-                data = _run_locked("update", operation)
+            data = operation() if (args.check or args.dry_run) else _run_locked("update", operation)
         elif args.command == "uninstall":
             if not args.dry_run and not args.yes:
                 if not _confirm(t("confirm_uninstall"), t("yes_hint")):
