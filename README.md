@@ -12,7 +12,7 @@ The project is deliberately more than a theme installer. Its goal is to provide 
 - configure GNOME in a mac-style, module by module;
 - keep a receipt of every managed mutation;
 - detect configuration drift;
-- report its state in human-readable or JSON form;
+- report its state in concise human-readable or stable JSON form;
 - undo only what MacUbuntu actually changed.
 
 > **Status: alpha / v0.1 foundation.** The reversible core is usable now. Appearance, gestures, launcher, sharing and device-integration modules are being moved into the same transaction model instead of being shipped as unrelated shell scripts.
@@ -35,7 +35,7 @@ Or run the complete safe transformation flow in one command:
 
 This performs audit → plan → apply. It still refuses an unsupported system and every mutation is recorded for uninstall.
 
-To see what MacUbuntu owns:
+To see the current MacUbuntu profile, whether the system is converged and what MacUbuntu actually owns:
 
 ```bash
 ./macubuntu status
@@ -53,6 +53,32 @@ If a managed setting was manually changed after MacUbuntu applied it, uninstall 
 ./macubuntu uninstall --yes --force
 ```
 
+## Human interface
+
+The default terminal interface is intentionally short and understandable without Linux/GNOME knowledge. It automatically selects Italian or English from the system locale, with an explicit override when desired:
+
+```bash
+./macubuntu status --lang it
+./macubuntu status --lang en
+```
+
+Technical identifiers, GSettings schemas, before/after values, state paths and individual operation results are hidden from normal output. Show them explicitly with:
+
+```bash
+./macubuntu status --verbose
+./macubuntu plan --verbose
+./macubuntu macify --yes --verbose
+```
+
+Presentation options can be written before or after the command. For example, both forms are valid:
+
+```bash
+./macubuntu --verbose status
+./macubuntu status --verbose
+```
+
+The normal interface and the machine interface are deliberately separate: scripts and AI agents should use `--json`, not parse translated console text.
+
 ## One-command use
 
 Once the repository is cloned, the main entry point is always `./macubuntu`. No Python virtual environment or third-party Python package is required for the current core.
@@ -60,32 +86,43 @@ Once the repository is cloned, the main entry point is always `./macubuntu`. No 
 For an unattended run by an automation or AI agent:
 
 ```bash
-./macubuntu --json audit
-./macubuntu --json plan
-./macubuntu --json macify --yes
-./macubuntu --json status
+./macubuntu audit --json
+./macubuntu plan --json
+./macubuntu macify --yes --json
+./macubuntu status --json
 ```
 
-The JSON interface is intended to remain stable enough for agents and higher-level installers to reason about support, planned changes and rollback state.
+The JSON interface uses stable machine-oriented status/action fields. Human translations do not change those codes.
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
 | `audit` | Inspect OS, GNOME, session, hardware identifier, packages and current settings |
-| `plan` | Show the exact changes that would be made |
+| `plan` | Summarize what MacUbuntu would change; use `--verbose` for exact resources |
 | `apply` | Apply supported mac-style modules |
 | `macify` | Audit, plan and apply in one autonomous run |
-| `status` | Show the operation receipt MacUbuntu currently owns |
+| `status` | Show profile state, convergence and operations actually owned by MacUbuntu |
 | `uninstall` | Restore recorded settings and safely remove packages installed by MacUbuntu |
 
 Global options:
 
 ```text
---json       machine-readable output
---dry-run    execute detection and planning without mutations
---version    show the MacUbuntu version
+--lang auto|it|en  interface language; auto follows the system locale
+--verbose          show technical resources, values and receipts
+--json             stable machine-readable output for agents/automation
+--dry-run          execute detection and planning without mutations
+--version          show the MacUbuntu version
 ```
+
+## Profile state vs ownership
+
+MacUbuntu deliberately separates two concepts:
+
+- **profile applied / converged** — whether the machine currently matches the MacUbuntu profile;
+- **owned operations** — changes that MacUbuntu itself performed and therefore may reverse.
+
+A machine can be fully converged with zero owned operations. This happens when the desired packages and settings already existed before MacUbuntu ran. MacUbuntu does not claim ownership of those pre-existing choices and will not remove them during uninstall.
 
 ## What v0.1 configures
 
@@ -142,12 +179,13 @@ The architecture is intentionally module-based so support for newer Ubuntu/GNOME
 
 Read [`AGENTS.md`](AGENTS.md). The short version is:
 
-1. run `./macubuntu --json audit`;
-2. run `./macubuntu --json plan`;
+1. run `./macubuntu audit --json`;
+2. run `./macubuntu plan --json`;
 3. inspect the plan and support level;
-4. run `./macubuntu --json macify --yes` only when appropriate;
+4. run `./macubuntu macify --yes --json` only when appropriate;
 5. never edit `state.json` manually;
-6. use `status` and `uninstall` rather than guessing what was changed.
+6. use `status` and `uninstall` rather than guessing what was changed;
+7. never parse the localized human output when JSON is available.
 
 ## Design principles
 
@@ -157,7 +195,8 @@ Read [`AGENTS.md`](AGENTS.md). The short version is:
 4. **Rollback receipts.** Record the previous state immediately after each successful mutation.
 5. **Feature detection.** Check schemas, packages and session capabilities instead of assuming them.
 6. **No opaque mega-script.** A one-command UX may orchestrate many modules, but each module remains independently diagnosable.
-7. **Agent-friendly output.** Important decisions must be available as structured data.
+7. **Human-first terminal UX.** Normal output is concise and localized; internals are opt-in with `--verbose`.
+8. **Agent-friendly output.** Important decisions are available as structured, language-independent JSON.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the internal model.
 
