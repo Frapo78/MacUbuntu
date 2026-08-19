@@ -29,6 +29,9 @@ jobs:
       - name: Unit tests
         run: python3 -m unittest discover -s tests -v
 
+      - name: Accent engine self-test
+        run: python3 macubuntu_app/assets/macubuntu_accent_engine.py --self-test
+
       - name: CLI smoke tests
         run: |
           ./macubuntu --version
