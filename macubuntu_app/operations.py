@@ -36,13 +36,30 @@ def apply_gsetting(*, runner: Runner, store: StateStore, state: dict[str, Any], 
 
     original = receipt["original"] if receipt else current
     gsettings_set(runner, schema, key, desired)
+    created_receipt = receipt is None
+    previous_applied = receipt.get("applied") if receipt else None
+    previous_updated_at = receipt.get("updated_at") if receipt else None
     if receipt is None:
         receipt = {"kind": "gsettings", "schema": schema, "key": key, "original": original, "applied": desired, "created_at": now_iso()}
         state["operations"].append(receipt)
     else:
         receipt["applied"] = desired
         receipt["updated_at"] = now_iso()
-    store.save(state, app_version)
+    try:
+        store.save(state, app_version)
+    except Exception:
+        # GSettings is cheap to restore. Never leave a setting mutated merely
+        # because its ownership receipt could not be persisted.
+        gsettings_set(runner, schema, key, current)
+        if created_receipt:
+            state["operations"].remove(receipt)
+        else:
+            receipt["applied"] = previous_applied
+            if previous_updated_at is None:
+                receipt.pop("updated_at", None)
+            else:
+                receipt["updated_at"] = previous_updated_at
+        raise
     return {"kind": "gsettings", "resource": f"{schema}::{key}", "status": "changed", "from": current, "to": desired}
 
 
@@ -55,7 +72,7 @@ def apply_apt_bundle(*, runner: Runner, store: StateStore, state: dict[str, Any]
         return {"kind": "apt_bundle", "resource": ",".join(requested), "status": "would_install", "packages": missing}
 
     before = installed_deb_packages(runner)
-    runner.run(apt_base_command() + ["install", "-y", *missing], capture=False)
+    runner.run(apt_base_command() + ["install", "-y", *missing], capture=None)
     after = installed_deb_packages(runner)
     added = sorted(after - before)
     if receipt is None:
@@ -69,8 +86,10 @@ def apply_apt_bundle(*, runner: Runner, store: StateStore, state: dict[str, Any]
 
 
 def uninstall_operations(*, runner: Runner, store: StateStore, state: dict[str, Any], app_version: str, force: bool, dry_run: bool) -> list[dict[str, Any]]:
+    from .external import uninstall_external_operation
+
     results: list[dict[str, Any]] = []
-    for op in reversed(state.get("operations", [])):
+    for op in list(reversed(state.get("operations", []))):
         if op.get("kind") == "gsettings":
             schema, key = op["schema"], op["key"]
             current = gsettings_get(runner, schema, key)
@@ -92,6 +111,31 @@ def uninstall_operations(*, runner: Runner, store: StateStore, state: dict[str, 
 
         elif op.get("kind") == "apt_bundle":
             added = [p for p in op.get("added", []) if package_installed(runner, p)]
+
+            # Flatpak is an application runtime, not just a dependency. If the
+            # user adopted a MacUbuntu-installed Flatpak setup by installing
+            # another user app, removing the runtime would break that app even
+            # though APT cannot see the semantic dependency. Release ownership
+            # conservatively instead.
+            if "flatpak" in added and runner.exists("flatpak"):
+                flatpak_apps = runner.run(
+                    ["flatpak", "--user", "list", "--app", "--columns=application"],
+                    check=False,
+                )
+                user_apps = [line for line in (flatpak_apps.stdout or "").splitlines() if line.strip()]
+                if user_apps:
+                    results.append({
+                        "kind": "apt_bundle",
+                        "resource": ",".join(op.get("requested", [])),
+                        "status": "would_release" if dry_run else "released",
+                        "reason": "flatpak_runtime_adopted_by_user",
+                        "user_apps": user_apps,
+                    })
+                    if not dry_run:
+                        state["operations"].remove(op)
+                        store.save(state, app_version)
+                    continue
+
             if not added:
                 results.append({"kind": "apt_bundle", "resource": ",".join(op.get("requested", [])), "status": "already_absent"})
                 if not dry_run:
@@ -116,12 +160,19 @@ def uninstall_operations(*, runner: Runner, store: StateStore, state: dict[str, 
             if dry_run:
                 results.append({"kind": "apt_bundle", "resource": ",".join(op.get("requested", [])), "status": "would_remove", "packages": added, "would_also_remove": extra, "forced": bool(extra and force)})
                 continue
-            runner.run(apt_base_command() + ["purge", "-y", *added], capture=False)
+            runner.run(apt_base_command() + ["purge", "-y", *added], capture=None)
             results.append({"kind": "apt_bundle", "resource": ",".join(op.get("requested", [])), "status": "removed", "packages": added, "forced": bool(extra and force)})
             state["operations"].remove(op)
             store.save(state, app_version)
         else:
-            results.append({"kind": op.get("kind", "unknown"), "status": "kept", "reason": "unknown_operation_kind"})
+            external = uninstall_external_operation(
+                op=op, runner=runner, store=store, state=state, app_version=app_version,
+                force=force, dry_run=dry_run,
+            )
+            if external is None:
+                results.append({"kind": op.get("kind", "unknown"), "status": "kept", "reason": "unknown_operation_kind"})
+            else:
+                results.append(external)
 
     if not dry_run:
         store.remove_if_empty(state)

@@ -1,100 +1,33 @@
 # Resilience and diagnostics
 
-MacUbuntu treats reversibility as a correctness requirement. Before adding more modules, the core protects three things: **readiness**, **exclusive ownership of mutations**, and **receipt durability**.
+MacUbuntu treats reversibility as a correctness requirement.
 
 ## Doctor
 
-Run:
+`./macubuntu doctor` is local and read-only. It checks Ubuntu/GNOME support, graphical session, GSettings, APT/dpkg tooling, privilege capability, managed-state integrity, free space and whether the local checkout is suitable for self-update. `apply` and `macify` use the same preflight.
 
-```bash
-./macubuntu doctor
-```
-
-The normal interface reports only the overall result and actionable warnings/errors. Technical evidence is opt-in:
-
-```bash
-./macubuntu doctor --verbose
-```
-
-Agents should use:
-
-```bash
-./macubuntu doctor --json
-```
-
-Doctor is local and read-only. It does not contact GitHub or modify the system. It checks:
-
-- Ubuntu/GNOME support level;
-- graphical session type;
-- GSettings availability and basic responsiveness;
-- APT/dpkg tooling;
-- root/sudo capability for privileged package operations;
-- MacUbuntu state-file integrity;
-- free disk space;
-- whether the checkout is suitable for automatic update.
-
-Repository/update problems are warnings because a tarball or development checkout can still configure the desktop. Missing core desktop/package capabilities and invalid state are blocking failures.
-
-`apply` and `macify` automatically run the same doctor preflight. A blocking doctor result prevents mutation.
+Use `./macubuntu doctor --verbose` for technical evidence and `./macubuntu doctor --json` for agents.
 
 ## Mutation lock
 
-Commands that can change either managed state or MacUbuntu's own checkout acquire:
+Real `apply`, `macify`, `uninstall` and `update` runs acquire the XDG-state lock `~/.local/state/macubuntu/macubuntu.lock`. Read-only audit/doctor/plan/status/update-check operations do not.
 
-```text
-~/.local/state/macubuntu/macubuntu.lock
-```
+## State durability
 
-The lock is non-blocking. If another MacUbuntu process already owns it, the second process exits safely instead of racing.
+`state.json` must contain valid JSON, a supported schema, a list of operation objects and a valid profile object. Corrupt state is never silently overwritten.
 
-The following commands are locked when they are not dry-runs/check-only operations:
+Before replacing a valid state, MacUbuntu copies it to `state.json.bak`. The backup is not automatically restored because machine mutations may have happened after it was created; recovery requires reconciliation rather than guessing.
 
-- `apply`;
-- `macify`;
-- `uninstall`;
-- `update`.
+## External component failures
 
-Read-only commands such as `audit`, `doctor`, `plan`, `status`, and `update --check` do not acquire the mutation lock.
+Third-party download/validation/install errors use the same controlled command-failure UX as APT/GSettings failures. In normal mode the user sees a short localized error. `--verbose`/JSON expose the failing resource, synthetic operation code and captured stderr.
 
-## State validation
+Source installers are pinned and constrained to MacUbuntu-owned user destinations. Partial/new destination entries created by a failed source install are cleaned when MacUbuntu can prove they did not exist before the run. No receipt is written until required output exists and has passed validation.
 
-The managed state normally lives at:
+## Flatpak adoption
 
-```text
-~/.local/state/macubuntu/state.json
-```
+If MacUbuntu added a Flatpak remote and the user later installs other apps from that remote, uninstall does not delete a now-shared dependency. MacUbuntu relinquishes ownership of the remote and leaves it available.
 
-Before MacUbuntu trusts it, the file must:
+## Known recovery boundary
 
-- contain valid JSON;
-- use a supported state schema version;
-- contain an operation list made of objects;
-- contain a valid profile object when present.
-
-A corrupted or structurally invalid state file is never silently replaced. Mutating commands stop and report a state error.
-
-## Last-known-good backup
-
-Before replacing an existing valid state file, MacUbuntu copies it to:
-
-```text
-~/.local/state/macubuntu/state.json.bak
-```
-
-The backup is therefore the state immediately before the latest successful state write. `doctor` checks whether a backup exists and whether it is itself valid when the primary state is broken.
-
-The backup is not automatically restored yet. Automatic recovery would need explicit rules for reconciling the backup with mutations that may already have happened on the machine. Until that transaction recovery model exists, MacUbuntu prefers to stop rather than guess.
-
-After a complete clean uninstall, both the empty state file and its stale backup are removed.
-
-## Agent behavior
-
-Agents must treat these machine codes as stable decisions:
-
-- doctor `status=healthy`: no warnings or failures;
-- doctor `status=degraded`: warnings exist, but no blocking failure;
-- doctor `status=blocked`: one or more blocking failures;
-- command `status=busy`: another MacUbuntu mutation is running;
-- command `status=state_error`: managed-state integrity prevented the operation.
-
-Never work around these safeguards with direct file deletion, `git reset --hard`, raw GSettings resets, or manual package removal.
+A process interruption between an external machine mutation and receipt persistence is still a special recovery case. Issue #12 tracks explicit transaction reconciliation. Until that work lands, MacUbuntu fails closed when receipt integrity is uncertain rather than reconstructing ownership from guesses.

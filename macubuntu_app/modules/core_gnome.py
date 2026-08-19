@@ -6,13 +6,12 @@ from ..operations import apply_apt_bundle, apply_gsetting
 from ..state import StateStore
 from ..system import gsettings_get
 from ..util import Runner, package_installed
+from .common import package_available
 
 
 class CoreGnomeModule:
     id = "core.gnome"
     title = "Core GNOME mac-style workflow"
-
-    packages = ["gnome-sushi"]
 
     settings = [
         ("org.gnome.desktop.wm.preferences", "button-layout", "'close,minimize,maximize:'", "window controls on the left"),
@@ -30,27 +29,47 @@ class CoreGnomeModule:
         ("org.gnome.shell.extensions.dash-to-dock", "show-trash", "true", "show Trash in dock"),
         ("org.gnome.shell.extensions.dash-to-dock", "running-indicator-style", "'DOTS'", "mac-like running indicators"),
         ("org.gnome.shell.extensions.dash-to-dock", "custom-theme-shrink", "true", "compact dock spacing"),
+        ("org.gnome.shell.extensions.dash-to-dock", "dock-fixed", "false", "floating dock instead of a full-width panel"),
+        ("org.gnome.shell.extensions.dash-to-dock", "autohide", "true", "hide the dock when not in use"),
+        ("org.gnome.shell.extensions.dash-to-dock", "intellihide", "true", "dodge application windows"),
+        ("org.gnome.shell.extensions.dash-to-dock", "require-pressure-to-show", "false", "show dock immediately at the screen edge"),
+        ("org.gnome.shell.extensions.dash-to-dock", "dash-max-icon-size", "48", "mac-like dock icon size"),
+        ("org.gnome.shell.extensions.dash-to-dock", "transparency-mode", "'DYNAMIC'", "dynamic dock translucency"),
+        ("org.gnome.shell.extensions.dash-to-dock", "background-opacity", "0.8", "translucent dock background"),
+        ("org.gnome.shell.extensions.dash-to-dock", "show-windows-preview", "true", "window previews from dock icons"),
     ]
+
+    def _packages(self, runner: Runner) -> list[str]:
+        packages = ["gnome-sushi"]
+        if package_available(runner, "gnome-shell-extension-ubuntu-dock"):
+            packages.append("gnome-shell-extension-ubuntu-dock")
+        return packages
 
     def plan(self, runner: Runner) -> list[dict[str, Any]]:
         changes: list[dict[str, Any]] = []
-        for package in self.packages:
-            changes.append({"module": self.id, "kind": "package", "resource": package, "action": "keep" if package_installed(runner, package) else "install"})
-
+        for package in self._packages(runner):
+            changes.append({
+                "module": self.id,
+                "kind": "package",
+                "resource": package,
+                "action": "keep" if package_installed(runner, package) else "install",
+            })
         for schema, key, desired, description in self.settings:
             current = gsettings_get(runner, schema, key)
-            if current is None:
-                action = "skip"
-            elif current == desired:
-                action = "keep"
-            else:
-                action = "set"
-            changes.append({"module": self.id, "kind": "gsettings", "resource": f"{schema}::{key}", "description": description, "current": current, "desired": desired, "action": action})
+            action = "skip" if current is None else ("keep" if current == desired else "set")
+            changes.append({
+                "module": self.id,
+                "kind": "gsettings",
+                "resource": f"{schema}::{key}",
+                "description": description,
+                "current": current,
+                "desired": desired,
+                "action": action,
+            })
         return changes
 
     def apply(self, *, runner: Runner, store: StateStore, state: dict[str, Any], app_version: str, dry_run: bool) -> list[dict[str, Any]]:
-        results: list[dict[str, Any]] = []
-        results.append(apply_apt_bundle(runner=runner, store=store, state=state, app_version=app_version, requested=self.packages, dry_run=dry_run))
+        results = [apply_apt_bundle(runner=runner, store=store, state=state, app_version=app_version, requested=self._packages(runner), dry_run=dry_run)]
         for schema, key, desired, _ in self.settings:
             results.append(apply_gsetting(runner=runner, store=store, state=state, app_version=app_version, schema=schema, key=key, desired=desired, dry_run=dry_run))
         return results

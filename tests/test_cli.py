@@ -13,14 +13,7 @@ class CLITests(unittest.TestCase):
         merged_env = os.environ.copy()
         if env:
             merged_env.update(env)
-        return subprocess.run(
-            [str(ROOT / "macubuntu"), *args],
-            cwd=ROOT,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=merged_env,
-        )
+        return subprocess.run([str(ROOT / "macubuntu"), *args], cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=merged_env)
 
     def test_help(self):
         cp = self.run_cli("--help")
@@ -88,7 +81,7 @@ class CLITests(unittest.TestCase):
     def test_version(self):
         cp = self.run_cli("--version")
         self.assertEqual(cp.returncode, 0)
-        self.assertIn("0.3.0", cp.stdout)
+        self.assertIn("0.4.0", cp.stdout)
 
 
 if __name__ == "__main__":

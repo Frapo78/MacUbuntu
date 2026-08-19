@@ -8,103 +8,62 @@ MacUbuntu is a transaction-oriented configuration engine, not a monolithic shell
 macubuntu
 └── macubuntu_app
     ├── cli.py          command line and human/JSON presentation
-    ├── doctor.py       local readiness and integrity diagnostics
-    ├── engine.py       orchestration
+    ├── doctor.py       local safety preflight
+    ├── engine.py       module orchestration
     ├── system.py       feature detection and audit
-    ├── operations.py   reversible mutations
+    ├── operations.py   core reversible GSettings/APT mutations
+    ├── external.py     safe third-party/repository/file/extension operations
+    ├── state.py        receipt persistence and validation
     ├── locking.py      exclusive mutation lock
-    ├── state.py        validated receipt persistence + backup
     ├── updater.py      safe official-repository self-update
     ├── util.py         subprocess and platform helpers
-    └── modules
-        └── core_gnome.py
+    └── modules/        independently plannable/applicable capabilities
 ```
-
-## Safety before mutation
-
-`apply` and `macify` run a local doctor preflight before changing the system. Blocking readiness failures prevent mutation. The doctor checks core desktop/package capabilities, state integrity and resource availability without network access.
-
-Commands that mutate MacUbuntu state or its own source checkout use a non-blocking exclusive lock under the XDG state directory. This prevents concurrent `apply`, `macify`, `uninstall`, or `update` processes from racing on the same receipts or checkout.
-
-See [`RESILIENCE.md`](RESILIENCE.md).
 
 ## Transaction model
 
-A module declares desired state. Operations perform the mutation and immediately append or update a receipt in the state store.
+A module declares desired state. Every successful mutation that MacUbuntu owns appends or updates a receipt immediately. Existing resources are not claimed merely because they match the desired profile.
 
-The state file normally lives at:
+State normally lives at `~/.local/state/macubuntu/state.json`; the last valid previous state is retained as `state.json.bak` before replacement.
 
-```text
-~/.local/state/macubuntu/state.json
-```
+### Receipt kinds
 
-Before being trusted, state must contain valid JSON, a supported schema, a valid profile object and an operation list made of objects. A corrupt or structurally invalid state file is never silently replaced.
+The v0.4 engine understands:
 
-Before replacing an existing valid state file, MacUbuntu keeps the previous known-good state at:
+- `gsettings` — original/applied GVariant values with drift-safe restore;
+- `apt_bundle` — actual dpkg package delta introduced by the transaction;
+- `owned_paths` — MacUbuntu-created files/directories plus content-tree digest and upstream provenance;
+- `gnome_extension` — whether MacUbuntu installed extension files, original enable state, pinned version and tree digest;
+- `apt_repository` — repository/PPA added by MacUbuntu;
+- `flatpak_app` — user Flatpak installed by MacUbuntu;
+- `flatpak_remote` — user remote added by MacUbuntu, with adoption protection if the user later relies on it;
+- `service` — original active/enabled state for a service MacUbuntu changed.
 
-```text
-~/.local/state/macubuntu/state.json.bak
-```
+## Third-party source boundary
 
-The backup is diagnostic/recovery evidence, not permission to guess at rollback. Automatic backup restoration requires future transaction reconciliation because machine mutations may have occurred after the backup was written.
+Source-based integrations are constrained more tightly than ordinary shell scripts:
 
-### GSettings receipt
+- HTTPS source allowlist;
+- pinned commits/version tags;
+- bounded download/archive sizes;
+- ZIP traversal and symlink rejection;
+- extension metadata UUID/GNOME-version verification;
+- MacUbuntu-specific user destinations;
+- unexpected installer output under a managed destination triggers cleanup/failure;
+- no receipt is written for a failed/incomplete install.
 
-A managed GNOME key records:
+Source installers are never used for GPU, bootloader, firmware or disk changes.
 
-- schema;
-- key;
-- original GVariant text;
-- last value applied by MacUbuntu.
+## Quiet subprocess model
 
-Uninstall restores the original value only when the current value still equals MacUbuntu's last applied value. A different current value is drift and is protected unless `--force` is requested.
-
-### APT bundle receipt
-
-Before installing a requested package bundle, MacUbuntu snapshots the installed dpkg package set. After the successful installation it records the package delta. This allows uninstall to know which packages were introduced by that transaction rather than merely which package names a module knows about.
-
-Before purge, MacUbuntu simulates the operation. If APT would remove packages outside the recorded delta, safe uninstall keeps the bundle and reports a dependency conflict. Forced uninstall may override this check.
-
-## Idempotence
-
-`plan` compares desired and current state. `apply` only mutates values that differ and only installs missing packages. Existing receipts are updated rather than duplicated.
-
-A successful `apply` records profile application even when every requested setting/package was already converged. Profile state and operation ownership remain separate concepts.
+Normal mode captures subprocess stdout/stderr so `apt`, Flatpak and upstream installers do not overwhelm beginners. The entrypoint enables streaming when `--verbose` is present. Detection commands that need parsed stdout explicitly request captured output.
 
 ## Module contract
 
-A module should expose:
+A module exposes a stable `id`, `plan(runner)` and `apply(runner, store, state, app_version, dry_run)`. Modules feature-detect schemas, packages, session type and GNOME major instead of assuming a particular image.
 
-- a stable `id`;
-- `plan(runner)`;
-- `apply(runner, store, state, app_version, dry_run)`.
-
-Modules should feature-detect schemas, keys, session type and package availability instead of assuming a particular Ubuntu image.
-
-No module may enter the default one-shot `macify` flow until every resource type it mutates has defined detection, receipt, drift and uninstall semantics.
+The v0.4 default catalog includes core GNOME, desktop tools, typography, WhiteSur appearance/wallpaper, Shell enhancements, X11 gestures, Ulauncher, Warpinator and phone integration.
 
 ## Scope boundaries
 
-The default transformation path must not modify:
-
-- bootloader configuration;
-- kernel command line;
-- GPU driver selection;
-- firmware;
-- disk partitions.
-
-Those are separate hardware-support concerns and should never be hidden inside a desktop customization module.
-
-## Future receipt kinds
-
-The same model will be extended for:
-
-- managed files/directories;
-- GNOME extensions;
-- third-party APT repositories/keys;
-- user/system services;
-- upstream source installs;
-- desktop launchers;
-- keyboard shortcut sets.
-
-Each new kind must define detection, apply, drift semantics and uninstall before it is enabled in the one-shot `macify` flow.
+The default transformation path does not modify bootloader configuration, kernel command line, GPU driver selection, firmware or disk partitions. Those are hardware-support concerns and must never be hidden inside a desktop customization run.

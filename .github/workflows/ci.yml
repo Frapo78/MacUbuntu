@@ -36,3 +36,5 @@ jobs:
           python3 -m json.tool /tmp/macubuntu-audit.json >/dev/null
           ./macubuntu --json doctor > /tmp/macubuntu-doctor.json || true
           python3 -m json.tool /tmp/macubuntu-doctor.json >/dev/null
+          ./macubuntu --json plan > /tmp/macubuntu-plan.json
+          python3 -m json.tool /tmp/macubuntu-plan.json >/dev/null
