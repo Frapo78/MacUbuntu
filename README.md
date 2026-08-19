@@ -4,28 +4,27 @@
 
 **Idea and implementation / Idea e realizzazione: Francesco Poltero.**
 
-MacUbuntu is an independent open-source project that turns a supported Ubuntu GNOME installation into a cohesive Mac-inspired desktop while keeping Ubuntu underneath. It is not a theme dump and it is not a destructive setup script: MacUbuntu audits the machine, plans changes, installs compatible components, records ownership receipts, detects drift, updates itself safely and can undo what it actually changed.
+MacUbuntu is an independent open-source project that turns a supported Ubuntu GNOME installation into a cohesive Mac-inspired desktop while keeping Ubuntu underneath. It audits the machine, plans changes, installs compatible components, records ownership receipts, detects drift, persists the intended desktop behavior across sessions, updates itself safely and can undo what it actually changed.
 
-> Status: **alpha / v0.4 deep-macify foundation**. The project is intentionally conservative about ownership and uninstall. Hardware drivers, GPU configuration, firmware, bootloader and disk partitioning remain outside the default transformation path.
+> Status: **alpha / v0.5 Tahoe-polish foundation**. Ownership and safe uninstall remain more important than visual tricks. Hardware drivers, GPU configuration, firmware, bootloader and disk partitioning remain outside the default transformation path.
 
 ## One command
-
-Clone MacUbuntu once:
 
 ```bash
 git clone https://github.com/Frapo78/MacUbuntu.git
 cd MacUbuntu
-```
-
-Then run:
-
-```bash
 ./macubuntu
 ```
 
-A bare launch is the beginner-friendly one-shot entry point. It performs the same flow as `macify`, shows a short plan and asks before changing the machine. During the apply phase it shows a real module-by-module progress bar with short localized Italian/English messages. Progress reflects completed MacUbuntu modules rather than a timer or simulated animation.
+The commandless launch is the beginner-friendly one-shot. It performs doctor/preflight checks, asks for confirmation, obtains sudo authorization up front only when the plan needs administrative work, then applies the supported modules.
 
-For unattended use by an AI agent or automation:
+During long work the normal terminal UI shows a **live animated progress bar**. Percentages move only when a real module completes; a spinner and moving pulse keep the bar visibly alive while downloads, APT or upstream installers are still working. On success MacUbuntu finishes with a localized greeting such as:
+
+```text
+🍏 Goditi il tuo nuovo MacUbuntu!
+```
+
+For unattended AI/automation use:
 
 ```bash
 ./macubuntu macify --yes --json
@@ -37,32 +36,54 @@ For technical terminal output:
 ./macubuntu macify --yes --verbose
 ```
 
-Normal mode deliberately hides APT, Flatpak and upstream-installer noise. `--verbose` keeps progress visible as stable step lines while streaming technical subprocess output. `--json` never mixes human progress text into the machine-readable response.
+`--verbose` keeps stable step lines while streaming technical subprocess output. `--json` never mixes prompts, progress animation or playful prose into the machine-readable result.
 
-## What the v0.4 one-shot manages
-
-MacUbuntu chooses established upstream projects and Ubuntu packages, pins external source/extension versions where practical and skips unsupported/conflicting components rather than forcing them.
+## What the v0.5 one-shot manages
 
 | Capability | Component / project | MacUbuntu behavior |
 |---|---|---|
-| Core desktop | GNOME + Ubuntu Dock | Dock, window controls, trackpad, previews, animations and mac-like dock behavior through reversible GSettings |
-| Quick Look-like preview | GNOME Sushi | Installs only when missing |
-| Theme | WhiteSur GTK | Pinned upstream source, installed under MacUbuntu-specific user paths; no libadwaita overwrite hack |
-| Icons | WhiteSur icon theme | Pinned upstream source under MacUbuntu-specific names |
-| Cursor | WhiteSur cursors | Pinned upstream source under a MacUbuntu-specific name |
-| Wallpaper | WhiteSur wallpapers | Pinned 2K light/dark files with Git-blob integrity verification |
-| Typography | Inter | Ubuntu `fonts-inter`; open alternative rather than redistributing Apple fonts |
+| Core desktop | GNOME + Ubuntu Dock | left-side window controls, Mac-like trackpad behavior, bottom floating Dock, previews and reversible GSettings |
+| Current window/Shell look | MacTahoe GTK | pinned upstream Tahoe-inspired GTK/Shell theme under `MacUbuntu-*` names, including rounded maximized-window styling; no libadwaita overwrite hack |
+| Icons | WhiteSur icon theme | mature pinned upstream icon layer under MacUbuntu-specific names |
+| Cursor | WhiteSur cursors | pinned upstream cursor layer under a MacUbuntu-specific name |
+| Title bar | MacTahoe + GNOME WM preferences | Tahoe-style chrome, left traffic-light controls, Inter Semi-Bold title text and Mac-like titlebar mouse actions |
+| Wallpapers | WhiteSur + Monterey + MacTahoe | six pinned open-source mac-inspired day/dark wallpapers with Git-blob verification; Tahoe day/night is the default pair |
+| Typography | Inter | Ubuntu `fonts-inter`; open alternative instead of redistributing proprietary Apple fonts |
+| Quick Look-like preview | GNOME Sushi | installs only when missing |
 | Shell polish | Blur my Shell | GNOME-version-pinned extension with exact official EGO review artifact |
-| Shell controls | Just Perfection | GNOME-version-pinned extension with exact official EGO review artifact; enabled without fragile opinionated key overrides |
-| Clipboard | Clipboard Indicator | GNOME-version-pinned extension with exact official EGO review artifact |
-| X11 gestures | Touchégg + X11 Gestures | Only on X11; stable Touchégg PPA when required; legacy pre-existing Touchégg is not silently replaced |
-| Spotlight-like launcher | Ulauncher | Stable official PPA when needed; reversible user service when available, otherwise a MacUbuntu-owned autostart file |
-| AirDrop-like LAN sharing | Warpinator (Linux Mint) | Verified user Flatpak from Flathub; encrypted LAN sharing; user must choose a private group code for secure mode |
-| Android continuity | GSConnect | GNOME-version-pinned extension; skipped when KDE Connect desktop is installed |
-| iPhone USB integration | libimobiledevice / ifuse / usbmuxd / GVfs | Ubuntu packages only, when available |
-| Desktop tooling | GNOME Tweaks + Extension Manager | Ubuntu packages when available |
+| Shell controls | Just Perfection | GNOME-version-pinned extension with exact official EGO review artifact |
+| Clipboard | Clipboard Indicator | GNOME-version-pinned extension |
+| X11 gestures | Touchégg + X11 Gestures | Touchégg system service plus persistent GNOME extension on X11 |
+| Spotlight-like launcher | Ulauncher | stable v5 channel; persistent user service when available, otherwise a MacUbuntu-owned GNOME autostart entry |
+| AirDrop-like LAN sharing | Warpinator | verified user Flatpak from Flathub; installed for on-demand use rather than forcibly opened at every login |
+| Android continuity | GSConnect | persistent GNOME extension; skipped when KDE Connect desktop is already installed |
+| iPhone USB integration | libimobiledevice / ifuse / usbmuxd / GVfs | Ubuntu packages when available |
+| Desktop tooling | GNOME Tweaks + Extension Manager | installed for on-demand configuration, not auto-opened every session |
 
-See [docs/COMPONENTS.md](docs/COMPONENTS.md) for exact pins, selection rationale and safety notes, and [docs/CREDITS.md](docs/CREDITS.md) for upstream acknowledgements.
+See [docs/COMPONENTS.md](docs/COMPONENTS.md) for exact pins and [docs/CREDITS.md](docs/CREDITS.md) for upstream acknowledgements.
+
+## Persistence across reboot
+
+MacUbuntu distinguishes **persistent functionality** from **interactive applications**:
+
+- GSettings, themes, icons, cursors, wallpaper choices, Dock settings and title-bar preferences are stored by GNOME and persist across login/reboot;
+- MacUbuntu explicitly keeps GNOME user extensions enabled and records the enabled extension set through reversible receipts;
+- Touchégg is managed as an enabled+active system service;
+- Ulauncher is managed through its user service when available, otherwise through `~/.config/autostart/macubuntu-ulauncher.desktop`;
+- interactive programs such as Warpinator, GNOME Tweaks and Extension Manager remain installed and available, but are **not** pointlessly opened at every login;
+- safe uninstall restores or removes only the persistence state MacUbuntu actually introduced.
+
+## Wallpaper policy
+
+MacUbuntu does **not** redistribute proprietary Apple wallpaper files. The default collection uses pinned assets from the open-source WhiteSur and MacTahoe projects to provide recognizable Big Sur/Monterey/Tahoe-inspired choices while keeping the repository redistributable and auditable.
+
+Files are installed under:
+
+```text
+~/.local/share/backgrounds/MacUbuntu/
+```
+
+The v0.5 collection contains WhiteSur light/dark, Monterey light/dark and MacTahoe day/night. Each download is verified against its pinned upstream Git blob before MacUbuntu accepts ownership.
 
 ## Safety model
 
@@ -73,12 +94,12 @@ MacUbuntu follows a few non-negotiable rules:
 - **ownership** — pre-existing packages/files/extensions stay user-owned;
 - **receipts** — a component is removed only when MacUbuntu has evidence that it installed or changed it;
 - **drift protection** — user changes made after MacUbuntu are preserved by safe uninstall;
-- **pinned external sources** — source archives and GNOME extension artifacts are selected by MacUbuntu releases instead of tracking arbitrary upstream `master`/`latest` state;
-- **archive safety** — downloaded ZIPs are path-checked and size/member-limited; only relative symlinks proven to remain inside the extraction root are preserved, while escaping links, traversal and special files are rejected;
-- **source allowlist** — runtime source downloads are restricted to the expected HTTPS upstream hosts;
-- **no hidden hardware surgery** — GPU/driver/firmware/boot/disk operations are not part of the normal macification path;
+- **pinned external sources** — external source and GNOME extension artifacts are selected by MacUbuntu releases rather than arbitrary `latest` state;
+- **archive safety** — downloads are source-allowlisted, path-checked and size/member-limited;
+- **no proprietary Apple asset redistribution**;
+- **no hidden hardware surgery** — GPU/driver/firmware/boot/disk operations are not part of the normal path;
 - **quiet by default** — technical command output is opt-in with `--verbose`;
-- **machine interface** — AI agents use `--json` and stable codes rather than scraping translated prose.
+- **machine interface** — agents use `--json` and stable codes rather than scraping translated prose.
 
 The resilience model is documented in [docs/RESILIENCE.md](docs/RESILIENCE.md).
 
@@ -90,16 +111,9 @@ Managed state normally lives at:
 ~/.local/state/macubuntu/state.json
 ```
 
-MacUbuntu records reversible GSettings changes, APT package deltas, third-party repositories it added, user Flatpak apps/remotes it added, GNOME extensions it installed/enabled, service state, generated files and MacUbuntu-owned directories/files downloaded from pinned upstream sources.
+MacUbuntu records reversible GSettings changes, APT package deltas, repositories it added, user Flatpak apps/remotes it added, GNOME extensions it installed/enabled, service state, generated files and MacUbuntu-owned paths downloaded from pinned upstream sources.
 
-Examples of ownership behavior:
-
-- if Sushi was already installed, MacUbuntu does not claim it and uninstall leaves it alone;
-- if a GNOME extension was already present but disabled, MacUbuntu can record only the enable/disable transition without claiming the extension files;
-- if Flathub already existed, MacUbuntu never claims the remote;
-- if MacUbuntu added Flathub and the user later installs other Flatpak apps from it, uninstall relinquishes the remote instead of breaking those apps;
-- source-installed themes use names beginning with `MacUbuntu-` so existing WhiteSur installations are not overwritten;
-- if a managed file/directory drifts after install, safe uninstall preserves it unless the user explicitly requests a force path where supported.
+A v0.4 installation upgrading to v0.5 can migrate from the WhiteSur GTK selection to MacTahoe without erasing the original pre-MacUbuntu GSettings receipt: the existing receipt retains the true original value while its current MacUbuntu-applied value is updated. Legacy MacUbuntu-owned WhiteSur assets remain tracked until safe uninstall rather than being silently orphaned.
 
 ## Commands
 
@@ -125,8 +139,6 @@ Common presentation options:
 --dry-run
 ```
 
-Mutating commands require confirmation unless `--yes` is supplied.
-
 ## Self-update
 
 ```bash
@@ -141,14 +153,12 @@ Read [AGENTS.md](AGENTS.md). Agents should use `doctor --json`, `plan --json`, `
 
 ## Development
 
-The core uses the Python standard library. Run tests with:
-
 ```bash
 python3 -m compileall -q macubuntu_app
 python3 -m unittest discover -s tests -v
 ```
 
-CI currently validates the supported Ubuntu LTS matrix before changes are merged.
+CI validates the supported Ubuntu LTS matrix before changes are merged.
 
 ## Credits and independence
 
@@ -156,7 +166,7 @@ MacUbuntu exists because of the work of GNOME, Ubuntu/Canonical and many indepen
 
 MacUbuntu is an independent community project conceived and implemented by **Francesco Poltero**. It is not affiliated with, endorsed by or sponsored by Apple Inc., Canonical Ltd. or the third-party projects it integrates. macOS, Mac and related Apple marks belong to Apple Inc.; Ubuntu is a trademark of Canonical Ltd.
 
-MacUbuntu does not distribute Apple proprietary operating-system assets or proprietary Apple fonts.
+MacUbuntu does not distribute Apple proprietary operating-system assets, proprietary Apple fonts or proprietary Apple wallpaper files.
 
 ## License
 
