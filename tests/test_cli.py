@@ -25,9 +25,16 @@ class CLITests(unittest.TestCase):
     def test_help(self):
         cp = self.run_cli("--help")
         self.assertEqual(cp.returncode, 0)
+        self.assertIn("doctor", cp.stdout)
         self.assertIn("macify", cp.stdout)
         self.assertIn("update", cp.stdout)
         self.assertIn("uninstall", cp.stdout)
+
+    def test_doctor_help_is_localized(self):
+        cp = self.run_cli("doctor", "--lang", "it", "--help")
+        self.assertEqual(cp.returncode, 0)
+        self.assertIn("output JSON stabile", cp.stdout)
+        self.assertIn("mostra dettagli tecnici", cp.stdout)
 
     def test_update_help_is_localized(self):
         cp = self.run_cli("update", "--lang", "it", "--help")
@@ -73,10 +80,15 @@ class CLITests(unittest.TestCase):
     def test_translator_keeps_machine_independent_messages_separate(self):
         self.assertNotEqual(Translator("it")("plan_nothing"), Translator("en")("plan_nothing"))
 
+    def test_failure_messages_are_localized(self):
+        self.assertIn("operazione di sistema", Translator("it")("command_failed"))
+        self.assertIn("system operation", Translator("en")("command_failed"))
+        self.assertIn("salvare", Translator("it")("state_error_state_write_error"))
+
     def test_version(self):
         cp = self.run_cli("--version")
         self.assertEqual(cp.returncode, 0)
-        self.assertIn("0.2.0", cp.stdout)
+        self.assertIn("0.3.0", cp.stdout)
 
 
 if __name__ == "__main__":

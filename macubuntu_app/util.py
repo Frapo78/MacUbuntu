@@ -18,10 +18,29 @@ class CommandError(RuntimeError):
 
 
 class Runner:
-    """Thin subprocess wrapper, replaceable in tests."""
+    """Thin subprocess wrapper, replaceable in tests.
+
+    Missing executables are normalized into return code 127 so `check=False`
+    detection code does not crash with FileNotFoundError.
+    """
 
     def run(self, args: Sequence[str], *, check: bool = True, capture: bool = True, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-        cp = subprocess.run(list(args), text=True, stdout=subprocess.PIPE if capture else None, stderr=subprocess.PIPE if capture else None, env=env)
+        command = list(args)
+        try:
+            cp = subprocess.run(
+                command,
+                text=True,
+                stdout=subprocess.PIPE if capture else None,
+                stderr=subprocess.PIPE if capture else None,
+                env=env,
+            )
+        except OSError as exc:
+            cp = subprocess.CompletedProcess(
+                command,
+                127,
+                stdout="" if capture else None,
+                stderr=str(exc) if capture else None,
+            )
         if check and cp.returncode != 0:
             raise CommandError(args, cp.returncode, cp.stdout or "", cp.stderr or "")
         return cp
@@ -74,6 +93,8 @@ def installed_deb_packages(runner: Runner) -> set[str]:
 
 
 def package_installed(runner: Runner, package: str) -> bool:
+    if not runner.exists("dpkg-query"):
+        return False
     cp = runner.run(["dpkg-query", "-W", "-f=${db:Status-Abbrev}", package], check=False)
     return cp.returncode == 0 and (cp.stdout or "").startswith("ii")
 

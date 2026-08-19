@@ -8,6 +8,7 @@ An AI agent should normally use this order:
 
 ```bash
 ./macubuntu update --check --json
+./macubuntu doctor --json
 ./macubuntu audit --json
 ./macubuntu plan --json
 ./macubuntu macify --yes --json
@@ -21,6 +22,14 @@ If `update --check --json` returns `data.status=update_available`, an agent may 
 ```
 
 only when the user is operating a normal official checkout and no local-development intent is present. After `data.status=updated`, start a new MacUbuntu process before continuing so the newly downloaded code is loaded.
+
+`doctor --json` is a local, read-only readiness gate. Agent logic should treat:
+
+- `data.status=healthy` as fully ready;
+- `data.status=degraded` as usable with non-blocking warnings;
+- `data.status=blocked` or `data.ok=false` as a hard stop for `apply`/`macify`.
+
+`macify` and `apply` also execute the doctor preflight internally, so an agent cannot bypass blocking readiness checks by omitting the explicit doctor step.
 
 For removal:
 
@@ -59,12 +68,30 @@ Blocked/error states include:
 
 Do not work around a blocked update with `git reset --hard`, forced checkout, local-file deletion, branch rewriting or remote replacement. Surface the blocker to the user or operate on the existing installed version.
 
+## Resilience statuses
+
+Mutating commands may return these cross-command states:
+
+- `status=busy`: another MacUbuntu mutation owns the process lock; do not retry in a tight loop or bypass the lock;
+- `status=state_error`: managed state cannot be trusted; inspect `code` and run `doctor --json`;
+- `status=preflight_failed`: doctor found a blocking readiness failure and no mutation was attempted.
+
+Known state-error codes include:
+
+- `state_corrupt`
+- `state_schema_unsupported`
+- `state_invalid`
+- `state_read_error`
+
+If doctor reports a valid state backup, do not restore it manually. A backup can be older than already-applied machine mutations, so recovery requires an explicit transaction-reconciliation workflow.
+
 ## Rules for agents
 
 - Never parse the normal localized console output. Use `--json`.
-- Never edit the state file manually.
+- Never edit, delete, or hand-restore the state file or its backup.
+- Never bypass the MacUbuntu mutation lock.
 - Treat `support.level=unsupported` as a hard stop.
-- Treat `support.level=experimental` as a reason to inspect `plan` before applying.
+- Treat `support.level=experimental` as a reason to inspect `doctor` and `plan` before applying.
 - Do not run raw `apt remove`, `gsettings reset`, or delete MacUbuntu-managed files to simulate uninstall.
 - Prefer `--dry-run` for exploratory actions.
 - Preserve receipts: MacUbuntu records each successful mutation immediately.
@@ -78,8 +105,8 @@ The top-level envelope is:
 
 ```json
 {
-  "macubuntu_version": "0.2.0",
-  "command": "audit",
+  "macubuntu_version": "0.3.0",
+  "command": "doctor",
   "interface": {
     "language": "en",
     "verbose": false
@@ -88,6 +115,8 @@ The top-level envelope is:
 }
 ```
 
-The `interface` object describes presentation choices only. Agent logic should depend on machine fields inside `data`, such as support levels, action/status codes, plan summaries, `profile_applied`, `converged`, update status and operation receipts.
+The `interface` object describes presentation choices only. Agent logic should depend on machine fields inside `data`, such as support levels, doctor check/status codes, action/status codes, plan summaries, `profile_applied`, `converged`, update status and operation receipts.
 
 Fields may be added in minor versions. Existing semantic fields should not be repurposed without a schema/version change.
+
+See [`docs/RESILIENCE.md`](docs/RESILIENCE.md) for the diagnostic, lock and state-safety model.

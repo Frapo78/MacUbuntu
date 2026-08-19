@@ -4,12 +4,16 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import __version__
+from .doctor import run_doctor
 from .engine import Engine
 from .i18n import Translator, detect_language
+from .locking import AppLock, LockBusyError
+from .state import StateError
 from .updater import update_checkout
+from .util import CommandError
 
 
 def _requested_language(argv: list[str] | None) -> str:
@@ -42,6 +46,9 @@ def build_parser(language: str | None = None) -> argparse.ArgumentParser:
 
     p_audit = sub.add_parser("audit", help=t("help_audit"))
     _add_common_options(p_audit, t, suppress_defaults=True)
+
+    p_doctor = sub.add_parser("doctor", help=t("help_doctor"))
+    _add_common_options(p_doctor, t, suppress_defaults=True)
 
     p_plan = sub.add_parser("plan", help=t("help_plan"))
     _add_common_options(p_plan, t, suppress_defaults=True)
@@ -109,6 +116,37 @@ def _print_audit(data: dict[str, Any], t: Translator, verbose: bool) -> None:
         print(f"  support: {level}")
         print(f"  modules: {', '.join(data.get('modules', [])) or '-'}")
         print(f"  state_file: {data['state_file']}")
+
+
+def _print_doctor(data: dict[str, Any], t: Translator, verbose: bool) -> None:
+    status = data.get("status", "blocked")
+    symbol = "✓" if status == "healthy" else "!"
+    print(f"{symbol} {t(f'doctor_{status}')}")
+    summary = data.get("summary", {})
+    print(t(
+        "doctor_summary",
+        passed=summary.get("pass", 0),
+        warnings=summary.get("warn", 0),
+        failed=summary.get("fail", 0),
+    ))
+
+    for item in data.get("checks", []):
+        if not verbose and item.get("status") == "pass":
+            continue
+        item_symbol = "✓" if item.get("status") == "pass" else ("!" if item.get("status") == "warn" else "✗")
+        key = f"doctor_{item.get('id')}_{item.get('code')}"
+        print(f"  {item_symbol} {t(key)}")
+        if item.get("id") == "state" and item.get("data", {}).get("backup_valid"):
+            print(f"    {t('doctor_state_backup_available')}")
+
+    if verbose:
+        print()
+        print(f"{t('technical_details')}:")
+        for item in data.get("checks", []):
+            print(
+                f"  {item.get('status', '?'):4} {item.get('id', '?')}:{item.get('code', '?')} "
+                f"{json.dumps(item.get('data', {}), sort_keys=True)}"
+            )
 
 
 def _print_plan(data: dict[str, Any], t: Translator, verbose: bool) -> None:
@@ -237,6 +275,29 @@ def _print_update(data: dict[str, Any], t: Translator, verbose: bool) -> None:
             print(f"  error: {data['error']}")
 
 
+def _print_global_error(data: dict[str, Any], t: Translator, verbose: bool) -> None:
+    if data.get("status") == "busy":
+        print(f"! {t('busy')}")
+    elif data.get("status") == "state_error":
+        key = f"state_error_{data.get('code', 'state_error')}"
+        print(f"! {t(key)}")
+    elif data.get("status") == "command_failed":
+        print(f"! {t('command_failed')}")
+    else:
+        print("! MacUbuntu error")
+    if verbose:
+        print()
+        print(f"{t('technical_details')}:")
+        for key, value in data.items():
+            if key != "ok":
+                print(f"  {key}: {value}")
+
+
+def _run_locked(command: str, operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+    with AppLock(command=command):
+        return operation()
+
+
 def main(argv: list[str] | None = None) -> int:
     language = _requested_language(argv)
     parser = build_parser(language)
@@ -244,46 +305,99 @@ def main(argv: list[str] | None = None) -> int:
     language = detect_language(args.lang)
     t = Translator(language)
     engine = Engine()
+    root = Path(__file__).resolve().parents[1]
 
-    if args.command == "audit":
-        data = engine.audit()
-    elif args.command == "plan":
-        data = engine.plan()
-    elif args.command == "status":
-        data = engine.status()
-    elif args.command in {"apply", "macify"}:
-        if not args.dry_run and not args.yes:
-            if not _confirm(t("confirm_apply"), t("yes_hint")):
-                print(t("cancelled"), file=sys.stderr)
-                return 2
-        data = engine.macify(dry_run=args.dry_run) if args.command == "macify" else engine.apply(dry_run=args.dry_run)
-    elif args.command == "update":
-        root = Path(__file__).resolve().parents[1]
-        data = update_checkout(engine.runner, root, check_only=bool(args.check or args.dry_run))
-    elif args.command == "uninstall":
-        if not args.dry_run and not args.yes:
-            if not _confirm(t("confirm_uninstall"), t("yes_hint")):
-                print(t("cancelled"), file=sys.stderr)
-                return 2
-        data = engine.uninstall(force=args.force, dry_run=args.dry_run)
-    else:
-        raise AssertionError(args.command)
+    try:
+        if args.command == "audit":
+            data = engine.audit()
+        elif args.command == "doctor":
+            data = run_doctor(engine.runner, engine.store, root)
+        elif args.command == "plan":
+            data = engine.plan()
+        elif args.command == "status":
+            data = engine.status()
+        elif args.command in {"apply", "macify"}:
+            preflight = run_doctor(engine.runner, engine.store, root)
+            if not preflight["ok"]:
+                data = {"ok": False, "status": "preflight_failed", "doctor": preflight}
+            else:
+                if not args.dry_run and not args.yes:
+                    if not _confirm(t("confirm_apply"), t("yes_hint")):
+                        print(t("cancelled"), file=sys.stderr)
+                        return 2
+                operation = (
+                    (lambda: engine.macify(dry_run=args.dry_run))
+                    if args.command == "macify"
+                    else (lambda: engine.apply(dry_run=args.dry_run))
+                )
+                data = operation() if args.dry_run else _run_locked(args.command, operation)
+                data["doctor"] = preflight
+        elif args.command == "update":
+            operation = lambda: update_checkout(
+                engine.runner,
+                root,
+                check_only=bool(args.check or args.dry_run),
+            )
+            data = operation() if (args.check or args.dry_run) else _run_locked("update", operation)
+        elif args.command == "uninstall":
+            if not args.dry_run and not args.yes:
+                if not _confirm(t("confirm_uninstall"), t("yes_hint")):
+                    print(t("cancelled"), file=sys.stderr)
+                    return 2
+            operation = lambda: engine.uninstall(force=args.force, dry_run=args.dry_run)
+            data = operation() if args.dry_run else _run_locked("uninstall", operation)
+        else:
+            raise AssertionError(args.command)
+    except LockBusyError as exc:
+        data = {
+            "ok": False,
+            "status": "busy",
+            "lock_file": str(exc.path),
+            "holder": exc.holder,
+        }
+    except StateError as exc:
+        data = {
+            "ok": False,
+            "status": "state_error",
+            "code": exc.code,
+            "path": str(exc.path),
+            "error": str(exc),
+        }
+    except CommandError as exc:
+        data = {
+            "ok": False,
+            "status": "command_failed",
+            "command": exc.args_list,
+            "returncode": exc.returncode,
+            "stdout": exc.stdout[-4000:],
+            "stderr": exc.stderr[-4000:],
+        }
 
     if args.json:
         _emit_json(args.command, data, language, args.verbose)
+    elif data.get("status") in {"busy", "state_error", "command_failed"}:
+        _print_global_error(data, t, args.verbose)
+    elif data.get("status") == "preflight_failed":
+        _print_doctor(data["doctor"], t, args.verbose)
     else:
         if args.command == "audit":
             _print_audit(data, t, args.verbose)
+        elif args.command == "doctor":
+            _print_doctor(data, t, args.verbose)
         elif args.command == "plan":
             _print_plan(data, t, args.verbose)
         elif args.command == "status":
             _print_status(data, t, args.verbose)
         elif args.command == "macify":
+            if data.get("doctor", {}).get("status") != "healthy":
+                _print_doctor(data["doctor"], t, args.verbose)
             _print_audit(data["audit"], t, args.verbose)
             _print_plan(data["plan"], t, args.verbose)
             if data["apply"] is not None:
                 _print_apply(data["apply"], t, args.verbose)
         elif args.command == "apply":
+            if data.get("doctor", {}).get("status") != "healthy":
+                _print_doctor(data["doctor"], t, args.verbose)
             _print_apply(data, t, args.verbose)
         elif args.command == "update":
             _print_update(data, t, args.verbose)
