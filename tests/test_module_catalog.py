@@ -10,6 +10,7 @@ class ModuleCatalogTests(unittest.TestCase):
         for expected in {
             "core.gnome",
             "desktop.tools",
+            "screenshots.macos",
             "appearance.typography",
             "appearance.mactahoe",
             "appearance.wallpapers",
