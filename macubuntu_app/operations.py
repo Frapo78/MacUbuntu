@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from .state import StateStore, now_iso
@@ -7,9 +8,24 @@ from .system import gsettings_get, gsettings_set
 from .util import Runner, apt_base_command, installed_deb_packages, package_installed
 
 
-def _find_setting_receipt(state: dict[str, Any], schema: str, key: str) -> dict[str, Any] | None:
+def _normalize_schema_dir(schema_dir: str | Path | None) -> str | None:
+    return str(schema_dir) if schema_dir is not None else None
+
+
+def _find_setting_receipt(
+    state: dict[str, Any],
+    schema: str,
+    key: str,
+    schema_dir: str | Path | None = None,
+) -> dict[str, Any] | None:
+    wanted_dir = _normalize_schema_dir(schema_dir)
     for op in state.get("operations", []):
-        if op.get("kind") == "gsettings" and op.get("schema") == schema and op.get("key") == key:
+        if (
+            op.get("kind") == "gsettings"
+            and op.get("schema") == schema
+            and op.get("key") == key
+            and op.get("schema_dir") == wanted_dir
+        ):
             return op
     return None
 
@@ -22,12 +38,24 @@ def _find_apt_receipt(state: dict[str, Any], requested: list[str]) -> dict[str, 
     return None
 
 
-def apply_gsetting(*, runner: Runner, store: StateStore, state: dict[str, Any], app_version: str, schema: str, key: str, desired: str, dry_run: bool) -> dict[str, Any]:
-    current = gsettings_get(runner, schema, key)
+def apply_gsetting(
+    *,
+    runner: Runner,
+    store: StateStore,
+    state: dict[str, Any],
+    app_version: str,
+    schema: str,
+    key: str,
+    desired: str,
+    dry_run: bool,
+    schema_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    normalized_dir = _normalize_schema_dir(schema_dir)
+    current = gsettings_get(runner, schema, key, normalized_dir)
     if current is None:
         return {"kind": "gsettings", "resource": f"{schema}::{key}", "status": "skipped", "reason": "schema_or_key_missing"}
 
-    receipt = _find_setting_receipt(state, schema, key)
+    receipt = _find_setting_receipt(state, schema, key, normalized_dir)
     if current == desired:
         return {"kind": "gsettings", "resource": f"{schema}::{key}", "status": "already_converged", "current": current}
 
@@ -35,12 +63,20 @@ def apply_gsetting(*, runner: Runner, store: StateStore, state: dict[str, Any], 
         return {"kind": "gsettings", "resource": f"{schema}::{key}", "status": "would_change", "from": current, "to": desired, "managed": receipt is not None}
 
     original = receipt["original"] if receipt else current
-    gsettings_set(runner, schema, key, desired)
+    gsettings_set(runner, schema, key, desired, normalized_dir)
     created_receipt = receipt is None
     previous_applied = receipt.get("applied") if receipt else None
     previous_updated_at = receipt.get("updated_at") if receipt else None
     if receipt is None:
-        receipt = {"kind": "gsettings", "schema": schema, "key": key, "original": original, "applied": desired, "created_at": now_iso()}
+        receipt = {
+            "kind": "gsettings",
+            "schema": schema,
+            "key": key,
+            "schema_dir": normalized_dir,
+            "original": original,
+            "applied": desired,
+            "created_at": now_iso(),
+        }
         state["operations"].append(receipt)
     else:
         receipt["applied"] = desired
@@ -48,9 +84,7 @@ def apply_gsetting(*, runner: Runner, store: StateStore, state: dict[str, Any], 
     try:
         store.save(state, app_version)
     except Exception:
-        # GSettings is cheap to restore. Never leave a setting mutated merely
-        # because its ownership receipt could not be persisted.
-        gsettings_set(runner, schema, key, current)
+        gsettings_set(runner, schema, key, current, normalized_dir)
         if created_receipt:
             state["operations"].remove(receipt)
         else:
@@ -92,7 +126,8 @@ def uninstall_operations(*, runner: Runner, store: StateStore, state: dict[str, 
     for op in list(reversed(state.get("operations", []))):
         if op.get("kind") == "gsettings":
             schema, key = op["schema"], op["key"]
-            current = gsettings_get(runner, schema, key)
+            schema_dir = op.get("schema_dir")
+            current = gsettings_get(runner, schema, key, schema_dir)
             applied, original = op["applied"], op["original"]
             if current is None:
                 results.append({"kind": "gsettings", "resource": f"{schema}::{key}", "status": "skipped", "reason": "schema_or_key_missing"})
@@ -104,7 +139,7 @@ def uninstall_operations(*, runner: Runner, store: StateStore, state: dict[str, 
             if dry_run:
                 results.append({"kind": "gsettings", "resource": f"{schema}::{key}", "status": "would_restore", "from": current, "to": original, "forced": bool(drifted and force)})
                 continue
-            gsettings_set(runner, schema, key, original)
+            gsettings_set(runner, schema, key, original, schema_dir)
             results.append({"kind": "gsettings", "resource": f"{schema}::{key}", "status": "restored", "from": current, "to": original, "forced": bool(drifted and force)})
             state["operations"].remove(op)
             store.save(state, app_version)
@@ -112,11 +147,6 @@ def uninstall_operations(*, runner: Runner, store: StateStore, state: dict[str, 
         elif op.get("kind") == "apt_bundle":
             added = [p for p in op.get("added", []) if package_installed(runner, p)]
 
-            # Flatpak is an application runtime, not just a dependency. If the
-            # user adopted a MacUbuntu-installed Flatpak setup by installing
-            # another user app, removing the runtime would break that app even
-            # though APT cannot see the semantic dependency. Release ownership
-            # conservatively instead.
             if "flatpak" in added and runner.exists("flatpak"):
                 flatpak_apps = runner.run(
                     ["flatpak", "--user", "list", "--app", "--columns=application"],
