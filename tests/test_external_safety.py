@@ -18,6 +18,13 @@ from macubuntu_app.util import Runner
 
 
 class ExternalSafetyTests(unittest.TestCase):
+    @staticmethod
+    def _symlink_info(name: str) -> zipfile.ZipInfo:
+        info = zipfile.ZipInfo(name)
+        info.create_system = 3
+        info.external_attr = 0o120777 << 16
+        return info
+
     def test_download_source_allowlist_rejects_http_and_unknown_hosts(self):
         with self.assertRaises(ExternalOperationError):
             _validate_download_url("http://github.com/example/example.zip")
@@ -32,6 +39,65 @@ class ExternalSafetyTests(unittest.TestCase):
             archive = root / "bad.zip"
             with zipfile.ZipFile(archive, "w") as zf:
                 zf.writestr("../escape", "bad")
+            with self.assertRaises(ExternalOperationError):
+                _safe_extract(archive, root / "out", resource="test")
+
+    def test_internal_relative_symlink_is_preserved(self):
+        """Models the relative SVG symlinks used by the pinned WhiteSur source."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            archive = root / "safe-symlink.zip"
+            prefix = "WhiteSur-gtk-theme-test/src/assets/gtk/scalable"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr(f"{prefix}/checkbox-mixed-symbolic.svg", "safe-svg")
+                zf.writestr(
+                    self._symlink_info(f"{prefix}/radio-mixed-symbolic.svg"),
+                    "checkbox-mixed-symbolic.svg",
+                )
+            out = root / "out"
+            _safe_extract(archive, out, resource="whitesur-gtk")
+            link = out / prefix / "radio-mixed-symbolic.svg"
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(link.read_text(encoding="utf-8"), "safe-svg")
+
+    def test_symlink_target_escape_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            archive = root / "escape-symlink.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr(self._symlink_info("root/link"), "../../outside")
+            with self.assertRaises(ExternalOperationError):
+                _safe_extract(archive, root / "out", resource="test")
+
+    def test_absolute_symlink_target_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            archive = root / "absolute-symlink.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr(self._symlink_info("root/link"), "/etc/passwd")
+            with self.assertRaises(ExternalOperationError):
+                _safe_extract(archive, root / "out", resource="test")
+
+    def test_member_below_archive_symlink_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            archive = root / "symlink-parent.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("root/inside/placeholder", "ok")
+                zf.writestr(self._symlink_info("root/linkdir"), "inside")
+                zf.writestr("root/linkdir/payload", "must-not-write-through-link")
+            with self.assertRaises(ExternalOperationError):
+                _safe_extract(archive, root / "out", resource="test")
+
+    def test_special_archive_member_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            archive = root / "special.zip"
+            fifo = zipfile.ZipInfo("root/fifo")
+            fifo.create_system = 3
+            fifo.external_attr = 0o010644 << 16
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr(fifo, "")
             with self.assertRaises(ExternalOperationError):
                 _safe_extract(archive, root / "out", resource="test")
 

@@ -98,7 +98,29 @@ def _download(url: str, target: Path, *, resource: str) -> None:
 
 
 def _safe_extract(zip_path: Path, destination: Path, *, resource: str) -> None:
+    """Extract a ZIP without allowing archive paths or symlinks to escape.
+
+    GitHub source archives can legitimately preserve relative Unix symlinks.
+    Python's ZipFile.extractall() does not recreate those links faithfully, so
+    MacUbuntu validates every member first and performs extraction itself.
+
+    Allowed symlinks must use a relative target whose lexical destination stays
+    inside the extraction root. Archive members may never be written through a
+    symlink directory, and special files such as devices/FIFOs/sockets are
+    rejected outright.
+    """
     destination = destination.resolve()
+
+    def inside(candidate: Path) -> bool:
+        try:
+            candidate.relative_to(destination)
+            return True
+        except ValueError:
+            return False
+
+    def lexical(path: Path) -> Path:
+        return Path(os.path.normpath(str(path)))
+
     try:
         with zipfile.ZipFile(zip_path) as archive:
             members = archive.infolist()
@@ -107,14 +129,114 @@ def _safe_extract(zip_path: Path, destination: Path, *, resource: str) -> None:
             total = sum(member.file_size for member in members)
             if total > MAX_ARCHIVE_UNCOMPRESSED:
                 raise ExternalOperationError("archive_too_large", resource, f"archive expands to {total} bytes")
+
+            validated: list[tuple[zipfile.ZipInfo, Path, int, str | None]] = []
+            seen: set[Path] = set()
+            symlink_paths: set[Path] = set()
+
             for member in members:
-                target = (destination / member.filename).resolve()
-                if target != destination and destination not in target.parents:
+                if not member.filename or "\x00" in member.filename:
+                    raise ExternalOperationError("unsafe_archive", resource, "archive contains an invalid path")
+
+                relative = Path(member.filename)
+                if relative.is_absolute() or any(part == ".." for part in relative.parts):
                     raise ExternalOperationError("unsafe_archive", resource, f"unsafe archive path: {member.filename}")
+                relative = Path(os.path.normpath(str(relative)))
+                if str(relative) in {"", "."}:
+                    raise ExternalOperationError("unsafe_archive", resource, f"unsafe archive path: {member.filename}")
+                if relative in seen:
+                    raise ExternalOperationError("unsafe_archive", resource, f"duplicate archive path: {member.filename}")
+                seen.add(relative)
+
+                target = lexical(destination / relative)
+                if not inside(target):
+                    raise ExternalOperationError("unsafe_archive", resource, f"unsafe archive path: {member.filename}")
+
                 unix_mode = (member.external_attr >> 16) & 0xFFFF
-                if (unix_mode & 0o170000) == 0o120000:
-                    raise ExternalOperationError("unsafe_archive", resource, f"archive symlink rejected: {member.filename}")
-            archive.extractall(destination)
+                file_type = unix_mode & 0o170000
+                is_symlink = file_type == 0o120000
+                is_directory = member.is_dir() or file_type == 0o040000
+                is_regular = file_type in {0, 0o100000}
+
+                if not (is_symlink or is_directory or is_regular):
+                    raise ExternalOperationError("unsafe_archive", resource, f"special archive member rejected: {member.filename}")
+
+                link_target: str | None = None
+                if is_symlink:
+                    if member.is_dir():
+                        raise ExternalOperationError("unsafe_archive", resource, f"invalid archive symlink: {member.filename}")
+                    try:
+                        link_target = archive.read(member).decode("utf-8")
+                    except UnicodeDecodeError as exc:
+                        raise ExternalOperationError("unsafe_archive", resource, f"invalid symlink target encoding: {member.filename}") from exc
+                    if not link_target or "\x00" in link_target:
+                        raise ExternalOperationError("unsafe_archive", resource, f"invalid archive symlink target: {member.filename}")
+                    link_path = Path(link_target)
+                    if link_path.is_absolute():
+                        raise ExternalOperationError("unsafe_archive", resource, f"absolute archive symlink rejected: {member.filename}")
+                    resolved_target = lexical(target.parent / link_path)
+                    if not inside(resolved_target):
+                        raise ExternalOperationError("unsafe_archive", resource, f"escaping archive symlink rejected: {member.filename}")
+                    symlink_paths.add(relative)
+
+                validated.append((member, relative, unix_mode, link_target))
+
+            # A regular member below an archive-created symlink directory could
+            # otherwise write outside the extraction root after that link exists.
+            for member, relative, _, _ in validated:
+                for parent in relative.parents:
+                    if parent == Path("."):
+                        break
+                    if parent in symlink_paths:
+                        raise ExternalOperationError(
+                            "unsafe_archive",
+                            resource,
+                            f"archive path traverses symlink: {member.filename}",
+                        )
+
+            destination.mkdir(parents=True, exist_ok=True)
+
+            # Directories and regular files are materialized first. Symlinks are
+            # created last, so no normal file write can traverse a new link.
+            for member, relative, unix_mode, link_target in validated:
+                if link_target is not None:
+                    continue
+                target = destination / relative
+                current = destination
+                for part in relative.parts[:-1]:
+                    current = current / part
+                    if current.is_symlink():
+                        raise ExternalOperationError("unsafe_archive", resource, f"archive path traverses existing symlink: {member.filename}")
+
+                file_type = unix_mode & 0o170000
+                if member.is_dir() or file_type == 0o040000:
+                    if target.is_symlink():
+                        raise ExternalOperationError("unsafe_archive", resource, f"archive directory replaces symlink: {member.filename}")
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if target.is_symlink():
+                    raise ExternalOperationError("unsafe_archive", resource, f"archive file replaces symlink: {member.filename}")
+                with archive.open(member, "r") as source, target.open("wb") as output:
+                    shutil.copyfileobj(source, output)
+                permissions = unix_mode & 0o777
+                if permissions:
+                    target.chmod(permissions)
+
+            for member, relative, _, link_target in validated:
+                if link_target is None:
+                    continue
+                target = destination / relative
+                current = destination
+                for part in relative.parts[:-1]:
+                    current = current / part
+                    if current.is_symlink():
+                        raise ExternalOperationError("unsafe_archive", resource, f"archive symlink parent is a symlink: {member.filename}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if target.exists() or target.is_symlink():
+                    raise ExternalOperationError("unsafe_archive", resource, f"archive symlink replaces existing path: {member.filename}")
+                os.symlink(link_target, target)
     except ExternalOperationError:
         raise
     except (zipfile.BadZipFile, OSError) as exc:
