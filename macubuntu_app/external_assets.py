@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .external_core import (
-    ExternalOperationError, _download, _find_receipt, _git_blob_sha1,
+    MAX_ARCHIVE_MEMBERS, ExternalOperationError, _download, _find_receipt, _git_blob_sha1,
     _record_owned_paths, _remove_created_entries, _safe_extract, _tree_digest,
 )
 from .state import StateStore
@@ -17,6 +17,7 @@ def apply_pinned_installer(
     *, runner: Runner, store: StateStore, state: dict[str, Any], app_version: str,
     resource: str, repository: str, commit: str, destination: Path,
     command: list[str], owned_prefix: str, dry_run: bool, required_paths: Iterable[str] = (),
+    archive_max_members: int = MAX_ARCHIVE_MEMBERS,
 ) -> dict[str, Any]:
     receipt = _find_receipt(state, "owned_paths", resource)
     if receipt:
@@ -46,7 +47,7 @@ def apply_pinned_installer(
             extract = tmp_path / "extract"
             extract.mkdir()
             _download(f"https://github.com/{repository}/archive/{commit}.zip", archive, resource=resource)
-            _safe_extract(archive, extract, resource=resource)
+            _safe_extract(archive, extract, resource=resource, max_members=archive_max_members)
             roots = [item for item in extract.iterdir() if item.is_dir()]
             if len(roots) != 1:
                 raise ExternalOperationError("source_layout_invalid", resource, f"unexpected source archive layout for {repository}")
@@ -127,7 +128,7 @@ def apply_pinned_download(
 def apply_pinned_subdir_copy(
     *, store: StateStore, state: dict[str, Any], app_version: str,
     resource: str, repository: str, commit: str, subdir: str,
-    destination: Path, dry_run: bool
+    destination: Path, dry_run: bool, archive_max_members: int = MAX_ARCHIVE_MEMBERS,
 ) -> dict[str, Any]:
     receipt = _find_receipt(state, "owned_paths", resource)
     if receipt and destination.exists():
@@ -147,7 +148,7 @@ def apply_pinned_subdir_copy(
             extract = tmp_path / "extract"
             extract.mkdir()
             _download(f"https://github.com/{repository}/archive/{commit}.zip", archive, resource=resource)
-            _safe_extract(archive, extract, resource=resource)
+            _safe_extract(archive, extract, resource=resource, max_members=archive_max_members)
             roots = [item for item in extract.iterdir() if item.is_dir()]
             if len(roots) != 1:
                 raise ExternalOperationError("source_layout_invalid", resource, f"unexpected source archive layout for {repository}")
