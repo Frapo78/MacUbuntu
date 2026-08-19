@@ -48,6 +48,8 @@ def apply_gsetting(*, runner: Runner, store: StateStore, state: dict[str, Any], 
     try:
         store.save(state, app_version)
     except Exception:
+        # GSettings is cheap to restore. Never leave a setting mutated merely
+        # because its ownership receipt could not be persisted.
         gsettings_set(runner, schema, key, current)
         if created_receipt:
             state["operations"].remove(receipt)
@@ -110,6 +112,11 @@ def uninstall_operations(*, runner: Runner, store: StateStore, state: dict[str, 
         elif op.get("kind") == "apt_bundle":
             added = [p for p in op.get("added", []) if package_installed(runner, p)]
 
+            # Flatpak is an application runtime, not just a dependency. If the
+            # user adopted a MacUbuntu-installed Flatpak setup by installing
+            # another user app, removing the runtime would break that app even
+            # though APT cannot see the semantic dependency. Release ownership
+            # conservatively instead.
             if "flatpak" in added and runner.exists("flatpak"):
                 flatpak_apps = runner.run(
                     ["flatpak", "--user", "list", "--app", "--columns=application"],
