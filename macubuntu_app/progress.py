@@ -9,6 +9,7 @@ _PHRASES: dict[str, dict[str, str]] = {
     "it": {
         "core.gnome": "Mettiamo ordine: anche il Finder approverebbe.",
         "desktop.tools": "Prepariamo gli attrezzi del mestiere.",
+        "screenshots.macos": "Prepariamo le scorciatoie da paparazzo digitale.",
         "typography": "Mettiamo in riga anche le lettere.",
         "appearance.mactahoe": "Vestiamo GNOME in stile Tahoe: sartoria digitale.",
         "appearance.whitesur": "Vestiamo GNOME da Mac, senza mele morsicate vere.",
@@ -26,6 +27,7 @@ _PHRASES: dict[str, dict[str, str]] = {
     "en": {
         "core.gnome": "Tidying things up. Finder would probably approve.",
         "desktop.tools": "Getting the desktop toolbox ready.",
+        "screenshots.macos": "Getting the digital paparazzi shortcuts ready.",
         "typography": "Even the letters are getting in line.",
         "appearance.mactahoe": "Dressing GNOME Tahoe-style. Digital tailoring time.",
         "appearance.whitesur": "Dressing GNOME like a Mac, minus the actual Apple.",
