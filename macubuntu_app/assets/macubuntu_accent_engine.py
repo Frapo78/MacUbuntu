@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import os
 import signal
-import sys
 
 ENGINE_NAME = "macubuntu-accents"
 ENGINE_PATH = "/org/freedesktop/IBus/MacUbuntuAccents/Engine"
@@ -35,9 +34,7 @@ def variants_for(character: str) -> tuple[str, ...]:
     if len(character) != 1:
         return ()
     variants = ACCENTS.get(character.lower(), ())
-    if character.isupper():
-        return tuple(value.upper() for value in variants)
-    return variants
+    return tuple(value.upper() for value in variants) if character.isupper() else variants
 
 
 def _load_ibus():
@@ -51,7 +48,6 @@ def _load_ibus():
 
 def run_engine() -> int:
     GLib, IBus = _load_ibus()
-
     release_mask = IBus.ModifierType.RELEASE_MASK
     blocking_mask = (
         IBus.ModifierType.CONTROL_MASK
@@ -99,7 +95,6 @@ def run_engine() -> int:
 
             if self._pending is not None:
                 if self._same_key(keyval, keycode):
-                    # Hardware auto-repeat must never create repeated base letters.
                     return True
                 self._commit_base_and_clear()
 
@@ -111,9 +106,6 @@ def run_engine() -> int:
             if not variants:
                 return False
 
-            # Delay only accent-capable letters until key release. Typical taps
-            # therefore feel immediate, while a hold can open candidates without
-            # inserting then deleting a base character.
             self._pending = {
                 "character": character,
                 "variants": variants,
@@ -128,26 +120,29 @@ def run_engine() -> int:
                 self._select(index)
 
         def do_focus_out(self):
-            self._commit_base_and_clear()
+            # Never risk committing a delayed key into a newly focused app.
+            self._clear_pending()
 
         def do_reset(self):
-            self._commit_base_and_clear()
+            self._clear_pending()
 
         def _on_release(self, keyval, keycode):
             if self._pending is None or not self._same_key(keyval, keycode):
                 return False
             if self._lookup_visible:
-                # Keep the chooser visible after the user releases the held key.
                 return True
             self._commit_base_and_clear()
             return True
 
         def _same_key(self, keyval, keycode):
-            return (
-                self._pending is not None
-                and self._pending["keyval"] == keyval
-                and self._pending["keycode"] == keycode
-            )
+            if self._pending is None:
+                return False
+            pending_code = self._pending["keycode"]
+            # Physical keycode remains stable even if Shift is released before
+            # the letter, which can otherwise change the release keyval.
+            if pending_code and keycode:
+                return pending_code == keycode
+            return self._pending["keyval"] == keyval
 
         def _show_lookup(self):
             self._timer = 0
@@ -155,10 +150,7 @@ def run_engine() -> int:
                 return GLib.SOURCE_REMOVE
             variants = self._pending["variants"]
             table = IBus.LookupTable.new(
-                page_size=min(9, len(variants)),
-                cursor_pos=0,
-                cursor_visible=True,
-                round=True,
+                page_size=min(9, len(variants)), cursor_pos=0, cursor_visible=True, round=True
             )
             table.set_orientation(IBus.Orientation.HORIZONTAL)
             for index, variant in enumerate(variants[:9]):
@@ -173,12 +165,10 @@ def run_engine() -> int:
         def _handle_lookup_key(self, keyval, keycode):
             if self._same_key(keyval, keycode):
                 return True
-
             index = numeric_index(keyval)
             if index >= 0:
                 self._select(index)
                 return True
-
             if keyval == IBus.KEY_Escape:
                 self._commit_base_and_clear()
                 return True
@@ -196,8 +186,6 @@ def run_engine() -> int:
                 if self._lookup is not None:
                     self._select(self._lookup.get_cursor_pos())
                 return True
-
-            # Normal typing closes the chooser and keeps the unaccented base.
             self._commit_base_and_clear()
             return None
 
@@ -241,10 +229,7 @@ def run_engine() -> int:
             if engine_name != ENGINE_NAME:
                 return None
             self._counter += 1
-            return AccentEngine(
-                self._connection,
-                f"{ENGINE_PATH}/{self._counter}",
-            )
+            return AccentEngine(self._connection, f"{ENGINE_PATH}/{self._counter}")
 
     IBus.init()
     loop = GLib.MainLoop()
