@@ -40,6 +40,12 @@ class CLITests(unittest.TestCase):
         self.assertIn("Turn Ubuntu GNOME", cp.stdout)
         self.assertIn("show technical details", cp.stdout)
 
+    def test_common_flags_work_after_subcommand(self):
+        cp = self.run_cli("status", "--lang", "it", "--verbose", "--help")
+        self.assertEqual(cp.returncode, 0)
+        self.assertIn("mostra dettagli tecnici", cp.stdout)
+        self.assertIn("lingua dell'interfaccia", cp.stdout)
+
     def test_locale_auto_selects_italian(self):
         previous = os.environ.get("LANG")
         previous_all = os.environ.pop("LC_ALL", None)
