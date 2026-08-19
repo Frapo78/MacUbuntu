@@ -1,122 +1,55 @@
 # MacUbuntu agent contract
 
-MacUbuntu is designed to be usable by both humans and automation. Human-readable output is intentionally concise and localized; agents should consume JSON and must not scrape or depend on translated prose.
+MacUbuntu is designed for humans and AI automation. Humans receive concise localized output; agents must consume `--json` and stable machine fields rather than parsing translated prose.
+
+## Project identity
+
+MacUbuntu is an independent open-source project conceived and implemented by **Francesco Poltero**. Preserve this credit in public project documentation. Third-party software remains owned by its upstream maintainers; preserve `docs/CREDITS.md` and `docs/COMPONENTS.md` whenever integrations change.
 
 ## Safe autonomous flow
-
-An AI agent should normally use this order:
 
 ```bash
 ./macubuntu update --check --json
 ./macubuntu doctor --json
-./macubuntu audit --json
 ./macubuntu plan --json
 ./macubuntu macify --yes --json
 ./macubuntu status --json
 ```
 
-If `update --check --json` returns `data.status=update_available`, an agent may run:
+A bare interactive `./macubuntu` is the human one-shot equivalent of `macify` and asks before mutation.
 
-```bash
-./macubuntu update --json
-```
+If `update --check --json` reports `data.status=update_available`, a normal official clean checkout may run `./macubuntu update --json`; start a new MacUbuntu process after an update.
 
-only when the user is operating a normal official checkout and no local-development intent is present. After `data.status=updated`, start a new MacUbuntu process before continuing so the newly downloaded code is loaded.
+## Non-negotiable rules
 
-`doctor --json` is a local, read-only readiness gate. Agent logic should treat:
+- Never edit `state.json` manually.
+- Never bypass uninstall receipts with raw `apt remove`, Flatpak removal, file deletion or GSettings resets.
+- Never work around an update blocker using `git reset --hard`, forced checkout or remote replacement.
+- Treat `support.level=unsupported` and a blocked `doctor` result as hard stops.
+- Inspect `plan` on experimental systems.
+- Preserve user drift unless the user explicitly selects a documented force behavior.
+- External components must have a reviewed upstream, a pinned/tested version where practical, a plan path, apply path and uninstall ownership semantics before joining the one-shot.
+- Do not add arbitrary download domains. Runtime source downloads use an explicit allowlist.
+- Do not enable WhiteSur libadwaita, GDM, Firefox-profile or GRUB rewrite helpers in the default flow without a dedicated reversible receipt design.
+- Hardware drivers, GPU configuration, kernel, firmware, bootloader and disk changes remain outside the default macification profile.
+- Never redistribute proprietary Apple fonts or operating-system assets.
 
-- `data.status=healthy` as fully ready;
-- `data.status=degraded` as usable with non-blocking warnings;
-- `data.status=blocked` or `data.ok=false` as a hard stop for `apply`/`macify`.
+## Third-party integration requirements
 
-`macify` and `apply` also execute the doctor preflight internally, so an agent cannot bypass blocking readiness checks by omitting the explicit doctor step.
+Before adding/updating a third-party project:
 
-For removal:
+1. verify the current official upstream and target Ubuntu/GNOME compatibility;
+2. prefer Ubuntu packages or upstream-maintained stable repositories over arbitrary binaries;
+3. pin source commits and GNOME extension version tags used by a MacUbuntu release;
+4. validate downloaded archive structure and metadata before copying to managed locations;
+5. use MacUbuntu-specific filenames/directories when possible so existing user installations are not overwritten;
+6. record a receipt immediately after each successful mutation;
+7. define safe drift behavior and uninstall before enabling the component in `ALL_MODULES`;
+8. update `docs/COMPONENTS.md` and `docs/CREDITS.md`;
+9. add tests and require green CI before merge.
 
-```bash
-./macubuntu uninstall --yes --json
-```
+## Output contract
 
-Global presentation options are accepted either before or after the command. `--verbose` is primarily for human diagnostics; it does not change the semantic data returned by `--json`.
+Normal mode is intentionally quiet. `--verbose` may stream technical subprocess output. `--json` must stay language-independent and contain stable action/status codes.
 
-Use `--force` only when the user explicitly wants MacUbuntu to overwrite post-install configuration drift or accept package-removal conflicts reported by the safe uninstall path.
-
-## Update statuses
-
-Agent logic for self-update must branch on `data.status`, not translated text. Safe success states are:
-
-- `up_to_date`
-- `update_available`
-- `updated`
-
-Blocked/error states include:
-
-- `git_missing`
-- `not_git_checkout`
-- `origin_missing`
-- `unofficial_remote`
-- `detached_head`
-- `wrong_branch`
-- `dirty_worktree`
-- `status_failed`
-- `head_unreadable`
-- `fetch_failed`
-- `remote_head_unreadable`
-- `local_ahead`
-- `diverged`
-- `fast_forward_failed`
-
-Do not work around a blocked update with `git reset --hard`, forced checkout, local-file deletion, branch rewriting or remote replacement. Surface the blocker to the user or operate on the existing installed version.
-
-## Resilience statuses
-
-Mutating commands may return these cross-command states:
-
-- `status=busy`: another MacUbuntu mutation owns the process lock; do not retry in a tight loop or bypass the lock;
-- `status=state_error`: managed state cannot be trusted; inspect `code` and run `doctor --json`;
-- `status=preflight_failed`: doctor found a blocking readiness failure and no mutation was attempted.
-
-Known state-error codes include:
-
-- `state_corrupt`
-- `state_schema_unsupported`
-- `state_invalid`
-- `state_read_error`
-
-If doctor reports a valid state backup, do not restore it manually. A backup can be older than already-applied machine mutations, so recovery requires an explicit transaction-reconciliation workflow.
-
-## Rules for agents
-
-- Never parse the normal localized console output. Use `--json`.
-- Never edit, delete, or hand-restore the state file or its backup.
-- Never bypass the MacUbuntu mutation lock.
-- Treat `support.level=unsupported` as a hard stop.
-- Treat `support.level=experimental` as a reason to inspect `doctor` and `plan` before applying.
-- Do not run raw `apt remove`, `gsettings reset`, or delete MacUbuntu-managed files to simulate uninstall.
-- Prefer `--dry-run` for exploratory actions.
-- Preserve receipts: MacUbuntu records each successful mutation immediately.
-- Distinguish profile state from ownership: a system may be fully converged while MacUbuntu owns zero mutations because everything was already configured before MacUbuntu ran.
-- If an operation is reported as drifted during uninstall, keep the user's newer value unless the user explicitly asks for `--force`.
-- Hardware drivers, GPU configuration and bootloader changes are outside the default MacUbuntu scope.
-
-## JSON stability
-
-The top-level envelope is:
-
-```json
-{
-  "macubuntu_version": "0.3.0",
-  "command": "doctor",
-  "interface": {
-    "language": "en",
-    "verbose": false
-  },
-  "data": {}
-}
-```
-
-The `interface` object describes presentation choices only. Agent logic should depend on machine fields inside `data`, such as support levels, doctor check/status codes, action/status codes, plan summaries, `profile_applied`, `converged`, update status and operation receipts.
-
-Fields may be added in minor versions. Existing semantic fields should not be repurposed without a schema/version change.
-
-See [`docs/RESILIENCE.md`](docs/RESILIENCE.md) for the diagnostic, lock and state-safety model.
+Fields may be added in minor versions; existing semantic fields should not be repurposed without a schema/version change.

@@ -1,317 +1,163 @@
 # MacUbuntu
 
-**Turn Ubuntu GNOME into a mac-style desktop with one reversible tool.**
+**Deep, reversible mac-style transformation for Ubuntu GNOME.**
 
-MacUbuntu is an open-source configuration engine for people who want the workflow, interaction model and visual conventions of a modern Mac while keeping Ubuntu underneath.
+**Idea and implementation / Idea e realizzazione: Francesco Poltero.**
 
-The project is deliberately more than a theme installer. Its goal is to provide one main application that can:
+MacUbuntu is an independent open-source project that turns a supported Ubuntu GNOME installation into a cohesive Mac-inspired desktop while keeping Ubuntu underneath. It is not a theme dump and it is not a destructive setup script: MacUbuntu audits the machine, plans changes, installs compatible components, records ownership receipts, detects drift, updates itself safely and can undo what it actually changed.
 
-- audit the machine and desktop session;
-- diagnose whether the environment is safe and ready to modify;
-- explain what is supported and what would change;
-- install only the packages that are missing;
-- configure GNOME in a mac-style, module by module;
-- keep a receipt of every managed mutation;
-- detect configuration drift;
-- protect managed state from corruption and concurrent operations;
-- update itself safely from the official GitHub repository;
-- report its state in concise human-readable or stable JSON form;
-- undo only what MacUbuntu actually changed.
+> Status: **alpha / v0.4 deep-macify foundation**. The project is intentionally conservative about ownership and uninstall. Hardware drivers, GPU configuration, firmware, bootloader and disk partitioning remain outside the default transformation path.
 
-> **Status: alpha / v0.3 foundation.** The reversible core, self-update path, doctor diagnostics, mutation lock and state-integrity safeguards are usable now. Appearance, gestures, launcher, sharing and device-integration modules are being moved into the same transaction model instead of being shipped as unrelated shell scripts.
+## One command
 
-## Quick start
+Clone MacUbuntu once:
 
 ```bash
 git clone https://github.com/Frapo78/MacUbuntu.git
 cd MacUbuntu
-./macubuntu doctor
-./macubuntu audit
-./macubuntu plan
-./macubuntu apply --yes
 ```
 
-Or run the complete safe transformation flow in one command:
+Then run:
 
 ```bash
-./macubuntu macify --yes
+./macubuntu
 ```
 
-`macify` runs the same doctor preflight automatically, then audit → plan → apply. Blocking readiness failures stop before mutation, unsupported systems are refused and every successful mutation is recorded for uninstall.
+A bare launch is the beginner-friendly one-shot entry point. It performs the same flow as `macify`, shows a short plan and asks before changing the machine.
 
-To see the current MacUbuntu profile, whether the system is converged and what MacUbuntu actually owns:
+For unattended use by an AI agent or automation:
 
 ```bash
-./macubuntu status
+./macubuntu macify --yes --json
 ```
 
-To update MacUbuntu itself from the official repository:
+For technical terminal output:
+
+```bash
+./macubuntu macify --yes --verbose
+```
+
+Normal mode deliberately hides APT, Flatpak and upstream-installer noise. `--verbose` streams technical subprocess output; failures still retain diagnostic stdout/stderr for JSON and troubleshooting.
+
+## What the v0.4 one-shot manages
+
+MacUbuntu chooses established upstream projects and Ubuntu packages, pins external source/extension versions where practical and skips unsupported/conflicting components rather than forcing them.
+
+| Capability | Component / project | MacUbuntu behavior |
+|---|---|---|
+| Core desktop | GNOME + Ubuntu Dock | Dock, window controls, trackpad, previews, animations and mac-like dock behavior through reversible GSettings |
+| Quick Look-like preview | GNOME Sushi | Installs only when missing |
+| Theme | WhiteSur GTK | Pinned upstream source, installed under MacUbuntu-specific user paths; no libadwaita overwrite hack |
+| Icons | WhiteSur icon theme | Pinned upstream source under MacUbuntu-specific names |
+| Cursor | WhiteSur cursors | Pinned upstream source under a MacUbuntu-specific name |
+| Wallpaper | WhiteSur wallpapers | Pinned 2K light/dark files with Git-blob integrity verification |
+| Typography | Inter | Ubuntu `fonts-inter`; open alternative rather than redistributing Apple fonts |
+| Shell polish | Blur my Shell | GNOME-version-pinned extension |
+| Shell controls | Just Perfection | GNOME-version-pinned extension, enabled without fragile opinionated key overrides |
+| Clipboard | Clipboard Indicator | GNOME-version-pinned extension |
+| X11 gestures | Touchégg + X11 Gestures | Only on X11; stable Touchégg PPA when required; legacy pre-existing Touchégg is not silently replaced |
+| Spotlight-like launcher | Ulauncher | Stable official PPA when needed; reversible user service when available, otherwise a MacUbuntu-owned autostart file |
+| AirDrop-like LAN sharing | Warpinator (Linux Mint) | Verified user Flatpak from Flathub; encrypted LAN sharing; user must choose a private group code for secure mode |
+| Android continuity | GSConnect | GNOME-version-pinned extension; skipped when KDE Connect desktop is installed |
+| iPhone USB integration | libimobiledevice / ifuse / usbmuxd / GVfs | Ubuntu packages only, when available |
+| Desktop tooling | GNOME Tweaks + Extension Manager | Ubuntu packages when available |
+
+See [docs/COMPONENTS.md](docs/COMPONENTS.md) for exact pins, selection rationale and safety notes, and [docs/CREDITS.md](docs/CREDITS.md) for upstream acknowledgements.
+
+## Safety model
+
+MacUbuntu follows a few non-negotiable rules:
+
+- **audit before mutation**;
+- **idempotence** — rerunning converges instead of duplicating work;
+- **ownership** — pre-existing packages/files/extensions stay user-owned;
+- **receipts** — a component is removed only when MacUbuntu has evidence that it installed or changed it;
+- **drift protection** — user changes made after MacUbuntu are preserved by safe uninstall;
+- **pinned external sources** — source archives and GNOME extension versions are selected by MacUbuntu releases instead of tracking arbitrary upstream `master`/`latest` state;
+- **archive safety** — downloaded ZIPs are path-checked, size-limited and symlink entries are rejected;
+- **source allowlist** — runtime source downloads are restricted to the expected HTTPS upstream hosts;
+- **no hidden hardware surgery** — GPU/driver/firmware/boot/disk operations are not part of the normal macification path;
+- **quiet by default** — technical command output is opt-in with `--verbose`;
+- **machine interface** — AI agents use `--json` and stable codes rather than scraping translated prose.
+
+The resilience model is documented in [docs/RESILIENCE.md](docs/RESILIENCE.md).
+
+## Reversibility
+
+Managed state normally lives at:
+
+```text
+~/.local/state/macubuntu/state.json
+```
+
+MacUbuntu records reversible GSettings changes, APT package deltas, third-party repositories it added, user Flatpak apps/remotes it added, GNOME extensions it installed/enabled, service state, generated files and MacUbuntu-owned directories/files downloaded from pinned upstream sources.
+
+Examples of ownership behavior:
+
+- if Sushi was already installed, MacUbuntu does not claim it and uninstall leaves it alone;
+- if a GNOME extension was already present but disabled, MacUbuntu can record only the enable/disable transition without claiming the extension files;
+- if Flathub already existed, MacUbuntu never claims the remote;
+- if MacUbuntu added Flathub and the user later installs other Flatpak apps from it, uninstall relinquishes the remote instead of breaking those apps;
+- source-installed themes use names beginning with `MacUbuntu-` so existing WhiteSur installations are not overwritten;
+- if a managed file/directory drifts after install, safe uninstall preserves it unless the user explicitly requests a force path where supported.
+
+## Commands
+
+```text
+./macubuntu                         one-shot interactive macification
+./macubuntu audit                   inspect system and compatibility
+./macubuntu doctor                  safety/readiness checks
+./macubuntu plan                    show what would change
+./macubuntu apply                   apply the configured modules
+./macubuntu macify                  audit → plan → apply
+./macubuntu status                  show convergence and owned operations
+./macubuntu update                  safe self-update from the official repository
+./macubuntu update --check          check without changing the checkout
+./macubuntu uninstall               restore MacUbuntu-owned changes
+```
+
+Common presentation options:
+
+```text
+--lang auto|it|en
+--verbose
+--json
+--dry-run
+```
+
+Mutating commands require confirmation unless `--yes` is supplied.
+
+## Self-update
 
 ```bash
 ./macubuntu update
 ```
 
-Check for an update without applying it:
+The updater accepts only a clean checkout of the official `Frapo78/MacUbuntu` `main` branch and uses a fast-forward update. It does not use `git reset --hard` and does not discard local work.
 
-```bash
-./macubuntu update --check
-```
+## AI agents
 
-The updater only performs a clean fast-forward of the official `main` branch. It refuses dirty worktrees, forks, development branches, locally-ahead histories and divergence rather than overwriting user work. See [`docs/UPDATE.md`](docs/UPDATE.md).
-
-To restore the recorded pre-MacUbuntu state:
-
-```bash
-./macubuntu uninstall --yes
-```
-
-If a managed setting was manually changed after MacUbuntu applied it, uninstall protects that newer user choice and reports drift. A deliberate full restore can be requested with:
-
-```bash
-./macubuntu uninstall --yes --force
-```
-
-## Doctor and diagnostics
-
-`doctor` is the safety/readiness check:
-
-```bash
-./macubuntu doctor
-```
-
-It is local, read-only and does not contact GitHub. It checks platform/session support, GSettings, package-management tools, privilege capability, state-file integrity, free disk space and whether the checkout is suitable for self-update.
-
-Possible machine statuses are:
-
-- `healthy` — no warnings or failures;
-- `degraded` — usable, with non-blocking warnings;
-- `blocked` — one or more failures that prevent safe `apply`/`macify`.
-
-For technical evidence:
-
-```bash
-./macubuntu doctor --verbose
-```
-
-For agents:
-
-```bash
-./macubuntu doctor --json
-```
-
-See [`docs/RESILIENCE.md`](docs/RESILIENCE.md).
-
-## Human interface
-
-The default terminal interface is intentionally short and understandable without Linux/GNOME knowledge. It automatically selects Italian or English from the system locale, with an explicit override when desired:
-
-```bash
-./macubuntu status --lang it
-./macubuntu status --lang en
-```
-
-Technical identifiers, GSettings schemas, before/after values, state paths, Git commits and individual operation results are hidden from normal output. Show them explicitly with:
-
-```bash
-./macubuntu doctor --verbose
-./macubuntu status --verbose
-./macubuntu plan --verbose
-./macubuntu update --verbose
-./macubuntu macify --yes --verbose
-```
-
-Presentation options can be written before or after the command. For example, both forms are valid:
-
-```bash
-./macubuntu --verbose status
-./macubuntu status --verbose
-```
-
-The normal interface and the machine interface are deliberately separate: scripts and AI agents should use `--json`, not parse translated console text.
-
-## One-command use
-
-Once the repository is cloned, the main entry point is always `./macubuntu`. No Python virtual environment or third-party Python package is required for the current core.
-
-For an unattended run by an automation or AI agent:
-
-```bash
-./macubuntu update --check --json
-./macubuntu doctor --json
-./macubuntu audit --json
-./macubuntu plan --json
-./macubuntu macify --yes --json
-./macubuntu status --json
-```
-
-The JSON interface uses stable machine-oriented status/action fields. Human translations do not change those codes.
-
-## Commands
-
-| Command | Purpose |
-|---|---|
-| `audit` | Inspect OS, GNOME, session, hardware identifier, packages and current settings |
-| `doctor` | Run local readiness, state-integrity and update-readiness diagnostics |
-| `plan` | Summarize what MacUbuntu would change; use `--verbose` for exact resources |
-| `apply` | Apply supported mac-style modules after a doctor preflight |
-| `macify` | Doctor, audit, plan and apply in one autonomous run |
-| `status` | Show profile state, convergence and operations actually owned by MacUbuntu |
-| `update` | Safely check/apply a fast-forward update from the official GitHub repository |
-| `uninstall` | Restore recorded settings and safely remove packages installed by MacUbuntu |
-
-Global options:
-
-```text
---lang auto|it|en  interface language; auto follows the system locale
---verbose          show technical resources, values and receipts
---json             stable machine-readable output for agents/automation
---dry-run          execute detection and planning without mutations
---version          show the MacUbuntu version
-```
-
-`update` additionally supports:
-
-```text
---check            fetch update metadata and report availability without changing source files
-```
-
-For `update`, `--dry-run` is equivalent to `--check`.
-
-## Safe self-update
-
-`./macubuntu update` is intentionally conservative. It validates that the program is running from a Git checkout whose `origin` points to `Frapo78/MacUbuntu`, requires a clean `main` branch, fetches `origin/main`, and only applies the update when Git proves that a fast-forward is possible.
-
-It never uses `git reset --hard`, never silently discards local files and never force-updates forks or development branches. After a successful update the files on disk are current; the next invocation automatically runs the newly downloaded code.
-
-## Resilience model
-
-Commands that mutate MacUbuntu state or its source checkout acquire an exclusive non-blocking lock at:
-
-```text
-~/.local/state/macubuntu/macubuntu.lock
-```
-
-This prevents two simultaneous `apply`, `macify`, `uninstall` or real `update` runs from racing on the same system.
-
-Managed state is validated before use. Corrupt JSON, unsupported state schemas or structurally invalid receipts fail closed instead of being overwritten. Before replacing a valid existing state file MacUbuntu saves the previous known-good copy at:
-
-```text
-~/.local/state/macubuntu/state.json.bak
-```
-
-The backup is not automatically restored because machine mutations may have happened after it was written; recovery must eventually reconcile receipts with actual system state rather than guess.
-
-## Profile state vs ownership
-
-MacUbuntu deliberately separates two concepts:
-
-- **profile applied / converged** — whether the machine currently matches the MacUbuntu profile;
-- **owned operations** — changes that MacUbuntu itself performed and therefore may reverse.
-
-A machine can be fully converged with zero owned operations. This happens when the desired packages and settings already existed before MacUbuntu ran. MacUbuntu does not claim ownership of those pre-existing choices and will not remove them during uninstall.
-
-## What v0.3 configures
-
-The first module, `core.gnome`, intentionally uses Ubuntu/GNOME components before adding external projects. It currently manages:
-
-- GNOME Sushi for Space-bar file previews, similar to Quick Look;
-- bottom-centered Ubuntu/Dash-to-Dock behavior where that schema is available;
-- mac-style window control placement on the left;
-- natural scrolling, tap-to-click and two-finger trackpad scrolling;
-- GNOME animations and a compact mac-like clock behavior.
-
-All settings are feature-detected. A missing GNOME schema or key is skipped rather than treated as a reason to damage or downgrade the desktop.
-
-## Reversibility model
-
-MacUbuntu stores state under the XDG state directory, normally:
-
-```text
-~/.local/state/macubuntu/
-├── state.json
-├── state.json.bak
-└── macubuntu.lock
-```
-
-Every mutation is recorded with enough information to reverse it. A GNOME setting receipt contains its original and applied values. For package installation, MacUbuntu snapshots the dpkg package set before and after the transaction and records the packages actually introduced by that transaction.
-
-During uninstall, operations are replayed in reverse. MacUbuntu refuses to silently overwrite a setting that has drifted after installation unless `--force` is explicitly supplied. Package removal is simulated first; if removing a MacUbuntu-installed bundle would now remove unrelated packages, the safe uninstall reports the conflict instead of proceeding blindly.
-
-This receipt model is the foundation for upcoming theme files, GNOME extensions, repositories and user services.
-
-## Planned modules
-
-The roadmap is organized around user-visible Mac capabilities rather than random tweaks:
-
-- `appearance.whitesur` — GTK/Shell theme, icons and cursor with upstream-aware uninstall;
-- `gestures.x11` — Touchégg + GNOME X11 Gestures with session detection;
-- `gestures.wayland` — native/desktop-supported gesture path where available;
-- `finder.nautilus` — Finder-like Nautilus behavior, previews and services;
-- `spotlight.launcher` — fast global app/file/action launcher;
-- `spaces.workspaces` — Mission Control/Spaces conventions;
-- `keyboard.macos` — mac-oriented shortcuts and modifier conventions;
-- `sharing.local` — AirDrop-like LAN sharing using open protocols;
-- `phone.integration` — phone notifications, file transfer and clipboard where supported;
-- `desktop.polish` — fonts, panel, dock and visual consistency;
-- `power.portable` — conservative laptop power tuning, kept separate from graphics drivers.
-
-Hardware driver changes, bootloader changes and GPU troubleshooting are outside the default MacUbuntu transformation path.
-
-## Supported systems
-
-The initial target is **Ubuntu GNOME 22.04 and 24.04**. Other Ubuntu/GNOME combinations are detected as experimental rather than rejected outright.
-
-The architecture is intentionally module-based so support for newer Ubuntu/GNOME releases can be added without rewriting the application.
-
-## For AI agents
-
-Read [`AGENTS.md`](AGENTS.md). The short version is:
-
-1. optionally run `./macubuntu update --check --json` and inspect `data.status`;
-2. run `./macubuntu doctor --json` and stop if it is blocked;
-3. run `./macubuntu audit --json`;
-4. run `./macubuntu plan --json`;
-5. inspect the plan and support level;
-6. run `./macubuntu macify --yes --json` only when appropriate;
-7. never edit/delete `state.json`, its backup or bypass the mutation lock;
-8. use `status` and `uninstall` rather than guessing what was changed;
-9. never parse the localized human output when JSON is available.
-
-## Design principles
-
-1. **Diagnose before mutation.** A blocking doctor result prevents apply/macify.
-2. **Audit before mutation.**
-3. **Idempotence.** Running `apply` again should converge, not duplicate work.
-4. **Ownership.** Never uninstall a package merely because MacUbuntu knows about it; remove it only if MacUbuntu installed it.
-5. **Rollback receipts.** Record the previous state immediately after each successful mutation.
-6. **Fail closed on state corruption.** Never replace ownership history that cannot be trusted.
-7. **Single-writer mutations.** Concurrent MacUbuntu writers are rejected rather than raced.
-8. **Feature detection.** Check schemas, packages and session capabilities instead of assuming them.
-9. **No opaque mega-script.** A one-command UX may orchestrate many modules, but each module remains independently diagnosable.
-10. **Human-first terminal UX.** Normal output is concise and localized; internals are opt-in with `--verbose`.
-11. **Agent-friendly output.** Important decisions are available as structured, language-independent JSON.
-12. **Safe self-update.** Updating the application must never require destructive Git operations.
-
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the internal model.
+Read [AGENTS.md](AGENTS.md). Agents should use `doctor --json`, `plan --json`, `macify --yes --json`, `status --json` and `uninstall --yes --json`, and must never bypass receipts with raw package removal, direct GSettings resets or forced Git operations.
 
 ## Development
 
-The core intentionally uses the Python standard library only. Run the current test suite with:
+The core uses the Python standard library. Run tests with:
 
 ```bash
+python3 -m compileall -q macubuntu_app
 python3 -m unittest discover -s tests -v
 ```
 
-## Upstream projects
+CI currently validates the supported Ubuntu LTS matrix before changes are merged.
 
-MacUbuntu integrates or plans to integrate upstream open-source projects rather than redistributing Apple software. Relevant projects include GNOME, Ubuntu, WhiteSur, Touchégg and GNOME X11 Gestures. Their own licenses and trademarks remain theirs.
+## Credits and independence
 
-## Trademark notice
+MacUbuntu exists because of the work of GNOME, Ubuntu/Canonical and many independent open-source maintainers. MacUbuntu installs or configures their software; it does not claim ownership or authorship of those projects. Please read [docs/CREDITS.md](docs/CREDITS.md).
 
-MacUbuntu is an independent community project and is not affiliated with, endorsed by or sponsored by Apple Inc. or Canonical Ltd. macOS, Mac and related Apple marks belong to Apple Inc. Ubuntu is a trademark of Canonical Ltd.
+MacUbuntu is an independent community project conceived and implemented by **Francesco Poltero**. It is not affiliated with, endorsed by or sponsored by Apple Inc., Canonical Ltd. or the third-party projects it integrates. macOS, Mac and related Apple marks belong to Apple Inc.; Ubuntu is a trademark of Canonical Ltd.
 
-MacUbuntu does not ship proprietary Apple operating-system files.
+MacUbuntu does not distribute Apple proprietary operating-system assets or proprietary Apple fonts.
 
 ## License
 
-MacUbuntu's own source code is released under the [MIT License](LICENSE). Third-party components installed by modules remain under their respective licenses.
+MacUbuntu's own source code is released under the [MIT License](LICENSE). Components installed or managed by MacUbuntu remain under their respective upstream licenses.

@@ -1,5 +1,31 @@
 #!/usr/bin/env python3
+import os
+import sys
+
+# The command runner reads this before the CLI constructs the engine. Normal
+# runs capture subprocess noise; --verbose deliberately streams technical output.
+if "--verbose" in sys.argv[1:]:
+    os.environ["MACUBUNTU_VERBOSE"] = "1"
+
 from macubuntu_app.cli import main
 
+COMMANDS = {"audit", "doctor", "plan", "status", "apply", "macify", "update", "uninstall"}
+
+
+def _beginner_args(args: list[str]) -> list[str]:
+    """Make a commandless invocation mean the safe interactive one-shot.
+
+    This also makes `./macubuntu --verbose` and `./macubuntu --lang it` useful,
+    while preserving top-level --help/--version behavior.
+    """
+    if not args:
+        return ["macify"]
+    if "--help" in args or "-h" in args or "--version" in args:
+        return args
+    if any(token in COMMANDS for token in args):
+        return args
+    return [*args, "macify"]
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(_beginner_args(sys.argv[1:])))

@@ -20,26 +20,45 @@ class CommandError(RuntimeError):
 class Runner:
     """Thin subprocess wrapper, replaceable in tests.
 
-    Missing executables are normalized into return code 127 so `check=False`
+    Normal MacUbuntu runs capture technical subprocess output. When the
+    entrypoint sets ``MACUBUNTU_VERBOSE=1``, commands whose capture mode was
+    not explicitly chosen stream to the terminal instead.
+
+    Missing executables are normalized into return code 127 so ``check=False``
     detection code does not crash with FileNotFoundError.
     """
 
-    def run(self, args: Sequence[str], *, check: bool = True, capture: bool = True, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    def __init__(self, *, verbose: bool | None = None):
+        self.verbose = (
+            os.environ.get("MACUBUNTU_VERBOSE") == "1"
+            if verbose is None
+            else bool(verbose)
+        )
+
+    def run(
+        self,
+        args: Sequence[str],
+        *,
+        check: bool = True,
+        capture: bool | None = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         command = list(args)
+        should_capture = (not self.verbose) if capture is None else capture
         try:
             cp = subprocess.run(
                 command,
                 text=True,
-                stdout=subprocess.PIPE if capture else None,
-                stderr=subprocess.PIPE if capture else None,
+                stdout=subprocess.PIPE if should_capture else None,
+                stderr=subprocess.PIPE if should_capture else None,
                 env=env,
             )
         except OSError as exc:
             cp = subprocess.CompletedProcess(
                 command,
                 127,
-                stdout="" if capture else None,
-                stderr=str(exc) if capture else None,
+                stdout="" if should_capture else None,
+                stderr=str(exc) if should_capture else None,
             )
         if check and cp.returncode != 0:
             raise CommandError(args, cp.returncode, cp.stdout or "", cp.stderr or "")
@@ -80,7 +99,7 @@ def atomic_json_write(path: Path, data: object) -> None:
 def installed_deb_packages(runner: Runner) -> set[str]:
     if not runner.exists("dpkg-query"):
         return set()
-    cp = runner.run(["dpkg-query", "-W", "-f=${binary:Package}\\t${db:Status-Abbrev}\\n"], check=False)
+    cp = runner.run(["dpkg-query", "-W", "-f=${binary:Package}\\t${db:Status-Abbrev}\\n"], check=False, capture=True)
     packages: set[str] = set()
     for line in (cp.stdout or "").splitlines():
         try:
@@ -95,7 +114,7 @@ def installed_deb_packages(runner: Runner) -> set[str]:
 def package_installed(runner: Runner, package: str) -> bool:
     if not runner.exists("dpkg-query"):
         return False
-    cp = runner.run(["dpkg-query", "-W", "-f=${db:Status-Abbrev}", package], check=False)
+    cp = runner.run(["dpkg-query", "-W", "-f=${db:Status-Abbrev}", package], check=False, capture=True)
     return cp.returncode == 0 and (cp.stdout or "").startswith("ii")
 
 
