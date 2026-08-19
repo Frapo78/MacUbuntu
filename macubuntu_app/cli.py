@@ -3,11 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 from . import __version__
 from .engine import Engine
 from .i18n import Translator, detect_language
+from .updater import update_checkout
 
 
 def _requested_language(argv: list[str] | None) -> str:
@@ -54,6 +56,10 @@ def build_parser(language: str | None = None) -> argparse.ArgumentParser:
     p_macify = sub.add_parser("macify", help=t("help_macify"))
     _add_common_options(p_macify, t, suppress_defaults=True)
     p_macify.add_argument("--yes", action="store_true", help=t("help_yes"))
+
+    p_update = sub.add_parser("update", help=t("help_update"))
+    _add_common_options(p_update, t, suppress_defaults=True)
+    p_update.add_argument("--check", action="store_true", help=t("help_update_check"))
 
     p_un = sub.add_parser("uninstall", help=t("help_uninstall"))
     _add_common_options(p_un, t, suppress_defaults=True)
@@ -201,6 +207,36 @@ def _print_status(data: dict[str, Any], t: Translator, verbose: bool) -> None:
             print(f"  receipt: {op.get('kind')} {resource}")
 
 
+def _print_update(data: dict[str, Any], t: Translator, verbose: bool) -> None:
+    status = data.get("status", "unknown")
+    message_key = f"update_{status}"
+    symbol = "✓" if data.get("ok") else "!"
+    print(f"{symbol} {t(message_key)}")
+    if status == "updated":
+        print(f"  {t('update_next_run')}")
+
+    if verbose:
+        print()
+        print(f"{t('technical_details')}:")
+        for key in (
+            "repository", "branch", "expected_branch", "remote_url", "status",
+            "check_only", "updated", "previous_commit", "current_commit", "latest_commit",
+            "restart_required",
+        ):
+            if key in data:
+                print(f"  {key}: {data[key]}")
+        if data.get("changed_files"):
+            print("  changed_files:")
+            for path in data["changed_files"]:
+                print(f"    - {path}")
+        if data.get("dirty_paths"):
+            print("  dirty_paths:")
+            for path in data["dirty_paths"]:
+                print(f"    - {path}")
+        if data.get("error"):
+            print(f"  error: {data['error']}")
+
+
 def main(argv: list[str] | None = None) -> int:
     language = _requested_language(argv)
     parser = build_parser(language)
@@ -221,6 +257,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(t("cancelled"), file=sys.stderr)
                 return 2
         data = engine.macify(dry_run=args.dry_run) if args.command == "macify" else engine.apply(dry_run=args.dry_run)
+    elif args.command == "update":
+        root = Path(__file__).resolve().parents[1]
+        data = update_checkout(engine.runner, root, check_only=bool(args.check or args.dry_run))
     elif args.command == "uninstall":
         if not args.dry_run and not args.yes:
             if not _confirm(t("confirm_uninstall"), t("yes_hint")):
@@ -246,6 +285,8 @@ def main(argv: list[str] | None = None) -> int:
                 _print_apply(data["apply"], t, args.verbose)
         elif args.command == "apply":
             _print_apply(data, t, args.verbose)
+        elif args.command == "update":
+            _print_update(data, t, args.verbose)
         elif args.command == "uninstall":
             _print_uninstall(data, t, args.verbose)
 
