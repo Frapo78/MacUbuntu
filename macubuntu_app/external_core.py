@@ -20,6 +20,7 @@ FLATHUB_URL = "https://flathub.org/repo/flathub.flatpakrepo"
 ALLOWED_DOWNLOAD_HOSTS = {"github.com", "codeload.github.com", "raw.githubusercontent.com", "extensions.gnome.org"}
 MAX_ARCHIVE_UNCOMPRESSED = 512 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 20000
+MAX_ARCHIVE_MEMBERS_HARD = 100000
 
 class ExternalOperationError(CommandError):
     """Controlled third-party failure using the normal command-error UX."""
@@ -97,7 +98,13 @@ def _download(url: str, target: Path, *, resource: str) -> None:
         raise ExternalOperationError("download_failed", resource, str(exc)) from exc
 
 
-def _safe_extract(zip_path: Path, destination: Path, *, resource: str) -> None:
+def _safe_extract(
+    zip_path: Path,
+    destination: Path,
+    *,
+    resource: str,
+    max_members: int = MAX_ARCHIVE_MEMBERS,
+) -> None:
     """Extract a ZIP without allowing archive paths or symlinks to escape.
 
     GitHub source archives can legitimately preserve relative Unix symlinks.
@@ -108,7 +115,18 @@ def _safe_extract(zip_path: Path, destination: Path, *, resource: str) -> None:
     inside the extraction root. Archive members may never be written through a
     symlink directory, and special files such as devices/FIFOs/sockets are
     rejected outright.
+
+    The standard member ceiling remains conservative. A pinned component may
+    request a higher ceiling when its known upstream archive legitimately
+    contains more entries, but no caller may exceed the hard safety ceiling.
     """
+    if max_members < 1 or max_members > MAX_ARCHIVE_MEMBERS_HARD:
+        raise ExternalOperationError(
+            "archive_limit_invalid",
+            resource,
+            f"archive member limit must be between 1 and {MAX_ARCHIVE_MEMBERS_HARD}",
+        )
+
     destination = destination.resolve()
 
     def inside(candidate: Path) -> bool:
@@ -124,8 +142,12 @@ def _safe_extract(zip_path: Path, destination: Path, *, resource: str) -> None:
     try:
         with zipfile.ZipFile(zip_path) as archive:
             members = archive.infolist()
-            if len(members) > MAX_ARCHIVE_MEMBERS:
-                raise ExternalOperationError("archive_too_many_files", resource, f"archive has {len(members)} entries")
+            if len(members) > max_members:
+                raise ExternalOperationError(
+                    "archive_too_many_files",
+                    resource,
+                    f"archive has {len(members)} entries (limit {max_members})",
+                )
             total = sum(member.file_size for member in members)
             if total > MAX_ARCHIVE_UNCOMPRESSED:
                 raise ExternalOperationError("archive_too_large", resource, f"archive expands to {total} bytes")
@@ -356,7 +378,6 @@ def _extension_known(runner: Runner, uuid: str) -> bool:
         if cp.returncode == 0:
             return True
     return _extension_user_dir(uuid).exists()
-
 def _git_blob_sha1(path: Path) -> str:
     data = path.read_bytes()
     header = f"blob {len(data)}\0".encode("ascii")
