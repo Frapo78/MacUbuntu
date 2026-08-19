@@ -7,22 +7,25 @@ MacUbuntu is an open-source configuration engine for people who want the workflo
 The project is deliberately more than a theme installer. Its goal is to provide one main application that can:
 
 - audit the machine and desktop session;
+- diagnose whether the environment is safe and ready to modify;
 - explain what is supported and what would change;
 - install only the packages that are missing;
 - configure GNOME in a mac-style, module by module;
 - keep a receipt of every managed mutation;
 - detect configuration drift;
+- protect managed state from corruption and concurrent operations;
 - update itself safely from the official GitHub repository;
 - report its state in concise human-readable or stable JSON form;
 - undo only what MacUbuntu actually changed.
 
-> **Status: alpha / v0.2 foundation.** The reversible core and safe self-update path are usable now. Appearance, gestures, launcher, sharing and device-integration modules are being moved into the same transaction model instead of being shipped as unrelated shell scripts.
+> **Status: alpha / v0.3 foundation.** The reversible core, self-update path, doctor diagnostics, mutation lock and state-integrity safeguards are usable now. Appearance, gestures, launcher, sharing and device-integration modules are being moved into the same transaction model instead of being shipped as unrelated shell scripts.
 
 ## Quick start
 
 ```bash
 git clone https://github.com/Frapo78/MacUbuntu.git
 cd MacUbuntu
+./macubuntu doctor
 ./macubuntu audit
 ./macubuntu plan
 ./macubuntu apply --yes
@@ -34,7 +37,7 @@ Or run the complete safe transformation flow in one command:
 ./macubuntu macify --yes
 ```
 
-This performs audit → plan → apply. It still refuses an unsupported system and every mutation is recorded for uninstall.
+`macify` runs the same doctor preflight automatically, then audit → plan → apply. Blocking readiness failures stop before mutation, unsupported systems are refused and every successful mutation is recorded for uninstall.
 
 To see the current MacUbuntu profile, whether the system is converged and what MacUbuntu actually owns:
 
@@ -68,6 +71,36 @@ If a managed setting was manually changed after MacUbuntu applied it, uninstall 
 ./macubuntu uninstall --yes --force
 ```
 
+## Doctor and diagnostics
+
+`doctor` is the safety/readiness check:
+
+```bash
+./macubuntu doctor
+```
+
+It is local, read-only and does not contact GitHub. It checks platform/session support, GSettings, package-management tools, privilege capability, state-file integrity, free disk space and whether the checkout is suitable for self-update.
+
+Possible machine statuses are:
+
+- `healthy` — no warnings or failures;
+- `degraded` — usable, with non-blocking warnings;
+- `blocked` — one or more failures that prevent safe `apply`/`macify`.
+
+For technical evidence:
+
+```bash
+./macubuntu doctor --verbose
+```
+
+For agents:
+
+```bash
+./macubuntu doctor --json
+```
+
+See [`docs/RESILIENCE.md`](docs/RESILIENCE.md).
+
 ## Human interface
 
 The default terminal interface is intentionally short and understandable without Linux/GNOME knowledge. It automatically selects Italian or English from the system locale, with an explicit override when desired:
@@ -80,6 +113,7 @@ The default terminal interface is intentionally short and understandable without
 Technical identifiers, GSettings schemas, before/after values, state paths, Git commits and individual operation results are hidden from normal output. Show them explicitly with:
 
 ```bash
+./macubuntu doctor --verbose
 ./macubuntu status --verbose
 ./macubuntu plan --verbose
 ./macubuntu update --verbose
@@ -103,6 +137,7 @@ For an unattended run by an automation or AI agent:
 
 ```bash
 ./macubuntu update --check --json
+./macubuntu doctor --json
 ./macubuntu audit --json
 ./macubuntu plan --json
 ./macubuntu macify --yes --json
@@ -116,9 +151,10 @@ The JSON interface uses stable machine-oriented status/action fields. Human tran
 | Command | Purpose |
 |---|---|
 | `audit` | Inspect OS, GNOME, session, hardware identifier, packages and current settings |
+| `doctor` | Run local readiness, state-integrity and update-readiness diagnostics |
 | `plan` | Summarize what MacUbuntu would change; use `--verbose` for exact resources |
-| `apply` | Apply supported mac-style modules |
-| `macify` | Audit, plan and apply in one autonomous run |
+| `apply` | Apply supported mac-style modules after a doctor preflight |
+| `macify` | Doctor, audit, plan and apply in one autonomous run |
 | `status` | Show profile state, convergence and operations actually owned by MacUbuntu |
 | `update` | Safely check/apply a fast-forward update from the official GitHub repository |
 | `uninstall` | Restore recorded settings and safely remove packages installed by MacUbuntu |
@@ -147,6 +183,24 @@ For `update`, `--dry-run` is equivalent to `--check`.
 
 It never uses `git reset --hard`, never silently discards local files and never force-updates forks or development branches. After a successful update the files on disk are current; the next invocation automatically runs the newly downloaded code.
 
+## Resilience model
+
+Commands that mutate MacUbuntu state or its source checkout acquire an exclusive non-blocking lock at:
+
+```text
+~/.local/state/macubuntu/macubuntu.lock
+```
+
+This prevents two simultaneous `apply`, `macify`, `uninstall` or real `update` runs from racing on the same system.
+
+Managed state is validated before use. Corrupt JSON, unsupported state schemas or structurally invalid receipts fail closed instead of being overwritten. Before replacing a valid existing state file MacUbuntu saves the previous known-good copy at:
+
+```text
+~/.local/state/macubuntu/state.json.bak
+```
+
+The backup is not automatically restored because machine mutations may have happened after it was written; recovery must eventually reconcile receipts with actual system state rather than guess.
+
 ## Profile state vs ownership
 
 MacUbuntu deliberately separates two concepts:
@@ -156,7 +210,7 @@ MacUbuntu deliberately separates two concepts:
 
 A machine can be fully converged with zero owned operations. This happens when the desired packages and settings already existed before MacUbuntu ran. MacUbuntu does not claim ownership of those pre-existing choices and will not remove them during uninstall.
 
-## What v0.2 configures
+## What v0.3 configures
 
 The first module, `core.gnome`, intentionally uses Ubuntu/GNOME components before adding external projects. It currently manages:
 
@@ -174,7 +228,9 @@ MacUbuntu stores state under the XDG state directory, normally:
 
 ```text
 ~/.local/state/macubuntu/
-└── state.json
+├── state.json
+├── state.json.bak
+└── macubuntu.lock
 ```
 
 Every mutation is recorded with enough information to reverse it. A GNOME setting receipt contains its original and applied values. For package installation, MacUbuntu snapshots the dpkg package set before and after the transaction and records the packages actually introduced by that transaction.
@@ -212,25 +268,29 @@ The architecture is intentionally module-based so support for newer Ubuntu/GNOME
 Read [`AGENTS.md`](AGENTS.md). The short version is:
 
 1. optionally run `./macubuntu update --check --json` and inspect `data.status`;
-2. run `./macubuntu audit --json`;
-3. run `./macubuntu plan --json`;
-4. inspect the plan and support level;
-5. run `./macubuntu macify --yes --json` only when appropriate;
-6. never edit `state.json` manually;
-7. use `status` and `uninstall` rather than guessing what was changed;
-8. never parse the localized human output when JSON is available.
+2. run `./macubuntu doctor --json` and stop if it is blocked;
+3. run `./macubuntu audit --json`;
+4. run `./macubuntu plan --json`;
+5. inspect the plan and support level;
+6. run `./macubuntu macify --yes --json` only when appropriate;
+7. never edit/delete `state.json`, its backup or bypass the mutation lock;
+8. use `status` and `uninstall` rather than guessing what was changed;
+9. never parse the localized human output when JSON is available.
 
 ## Design principles
 
-1. **Audit before mutation.**
-2. **Idempotence.** Running `apply` again should converge, not duplicate work.
-3. **Ownership.** Never uninstall a package merely because MacUbuntu knows about it; remove it only if MacUbuntu installed it.
-4. **Rollback receipts.** Record the previous state immediately after each successful mutation.
-5. **Feature detection.** Check schemas, packages and session capabilities instead of assuming them.
-6. **No opaque mega-script.** A one-command UX may orchestrate many modules, but each module remains independently diagnosable.
-7. **Human-first terminal UX.** Normal output is concise and localized; internals are opt-in with `--verbose`.
-8. **Agent-friendly output.** Important decisions are available as structured, language-independent JSON.
-9. **Safe self-update.** Updating the application must never require destructive Git operations.
+1. **Diagnose before mutation.** A blocking doctor result prevents apply/macify.
+2. **Audit before mutation.**
+3. **Idempotence.** Running `apply` again should converge, not duplicate work.
+4. **Ownership.** Never uninstall a package merely because MacUbuntu knows about it; remove it only if MacUbuntu installed it.
+5. **Rollback receipts.** Record the previous state immediately after each successful mutation.
+6. **Fail closed on state corruption.** Never replace ownership history that cannot be trusted.
+7. **Single-writer mutations.** Concurrent MacUbuntu writers are rejected rather than raced.
+8. **Feature detection.** Check schemas, packages and session capabilities instead of assuming them.
+9. **No opaque mega-script.** A one-command UX may orchestrate many modules, but each module remains independently diagnosable.
+10. **Human-first terminal UX.** Normal output is concise and localized; internals are opt-in with `--verbose`.
+11. **Agent-friendly output.** Important decisions are available as structured, language-independent JSON.
+12. **Safe self-update.** Updating the application must never require destructive Git operations.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the internal model.
 
