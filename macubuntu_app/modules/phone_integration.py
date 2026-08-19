@@ -13,7 +13,10 @@ class PhoneIntegrationModule:
     id = "phone.integration"
     title = "Phone integration for iPhone and Android"
     GS_UUID = "gsconnect@andyholmes.github.io"
-    GS_VERSIONS = {"42": 68, "46": 72}
+    GS_PINS = {
+        "42": {"version": 68, "review_id": 66552},
+        "46": {"version": 72, "review_id": 70399},
+    }
     IPHONE_PACKAGES = ["libimobiledevice-utils", "ifuse", "usbmuxd", "gvfs-backends"]
 
     def plan(self, runner: Runner) -> list[dict[str, Any]]:
@@ -24,17 +27,25 @@ class PhoneIntegrationModule:
             else:
                 changes.append({"module": self.id, "kind": "package", "resource": package, "action": "skip", "reason": "package_unavailable"})
         major = shell_major(runner)
-        gs_version = self.GS_VERSIONS.get(major or "")
+        pin = self.GS_PINS.get(major or "")
         if package_installed(runner, "kdeconnect"):
             changes.append({"module": self.id, "kind": "gnome_extension", "resource": "GSConnect", "action": "skip", "reason": "kdeconnect_conflict"})
-        elif gs_version is None:
+        elif pin is None:
             changes.append({"module": self.id, "kind": "gnome_extension", "resource": "GSConnect", "action": "skip", "reason": "unsupported_gnome_version"})
         else:
             if not gnome_extension_known(runner, self.GS_UUID):
                 action = "install"
             else:
                 action = "keep" if gnome_extension_enabled(runner, self.GS_UUID) else "set"
-            changes.append({"module": self.id, "kind": "gnome_extension", "resource": "GSConnect", "uuid": self.GS_UUID, "version": gs_version, "action": action})
+            changes.append({
+                "module": self.id,
+                "kind": "gnome_extension",
+                "resource": "GSConnect",
+                "uuid": self.GS_UUID,
+                "version": int(pin["version"]),
+                "review_id": int(pin["review_id"]),
+                "action": action,
+            })
         return changes
 
     def apply(self, *, runner: Runner, store: StateStore, state: dict[str, Any], app_version: str, dry_run: bool) -> list[dict[str, Any]]:
@@ -49,9 +60,19 @@ class PhoneIntegrationModule:
             results.append({"kind": "gnome_extension", "resource": self.GS_UUID, "status": "skipped", "reason": "kdeconnect_conflict"})
             return results
         major = shell_major(runner)
-        version = self.GS_VERSIONS.get(major or "")
-        if version is None:
+        pin = self.GS_PINS.get(major or "")
+        if pin is None:
             results.append({"kind": "gnome_extension", "resource": self.GS_UUID, "status": "skipped", "reason": "unsupported_gnome_version"})
             return results
-        results.append(apply_gnome_extension(runner=runner, store=store, state=state, app_version=app_version, uuid=self.GS_UUID, version=version, shell_major=str(major), dry_run=dry_run))
+        results.append(apply_gnome_extension(
+            runner=runner,
+            store=store,
+            state=state,
+            app_version=app_version,
+            uuid=self.GS_UUID,
+            version=int(pin["version"]),
+            review_id=int(pin["review_id"]),
+            shell_major=str(major),
+            dry_run=dry_run,
+        ))
         return results

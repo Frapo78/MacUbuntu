@@ -11,6 +11,7 @@ from .doctor import run_doctor
 from .engine import Engine
 from .i18n import Translator, detect_language
 from .locking import AppLock, LockBusyError
+from .progress import ProgressUI
 from .state import StateError
 from .updater import update_checkout
 from .util import CommandError
@@ -325,12 +326,17 @@ def main(argv: list[str] | None = None) -> int:
                     if not _confirm(t("confirm_apply"), t("yes_hint")):
                         print(t("cancelled"), file=sys.stderr)
                         return 2
+                progress = None if (args.json or args.dry_run) else ProgressUI(language, verbose=args.verbose)
                 operation = (
-                    (lambda: engine.macify(dry_run=args.dry_run))
+                    (lambda: engine.macify(dry_run=args.dry_run, progress=progress))
                     if args.command == "macify"
-                    else (lambda: engine.apply(dry_run=args.dry_run))
+                    else (lambda: engine.apply(dry_run=args.dry_run, progress=progress))
                 )
-                data = operation() if args.dry_run else _run_locked(args.command, operation)
+                try:
+                    data = operation() if args.dry_run else _run_locked(args.command, operation)
+                finally:
+                    if progress is not None:
+                        progress.close()
                 data["doctor"] = preflight
         elif args.command == "update":
             operation = lambda: update_checkout(

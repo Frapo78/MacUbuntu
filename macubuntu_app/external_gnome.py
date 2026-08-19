@@ -3,17 +3,19 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
-import urllib.parse
 from pathlib import Path
 from typing import Any
 
 from .external_core import (
-    EGO_DOWNLOAD, ExternalOperationError, _download, _enabled_extensions,
+    ExternalOperationError, _download, _enabled_extensions,
     _extension_known, _extension_user_dir, _find_receipt, _safe_extract,
     _save_receipt, _set_enabled_extensions, _tree_digest,
 )
 from .state import StateStore
 from .util import Runner
+
+EGO_REVIEW_DOWNLOAD = "https://extensions.gnome.org/review/download/{review_id}.shell-extension.zip"
+
 
 def apply_extension_state(
     *, runner: Runner, store: StateStore, state: dict[str, Any], app_version: str, uuid: str, dry_run: bool
@@ -35,9 +37,10 @@ def apply_extension_state(
         raise
     return {"kind": "gnome_extension", "resource": uuid, "status": "changed", "to": "enabled", "session_restart_required": True}
 
+
 def apply_gnome_extension(
     *, runner: Runner, store: StateStore, state: dict[str, Any], app_version: str,
-    uuid: str, version: int, shell_major: str, dry_run: bool
+    uuid: str, version: int, review_id: int, shell_major: str, dry_run: bool
 ) -> dict[str, Any]:
     receipt = _find_receipt(state, "gnome_extension", uuid)
     enabled = _enabled_extensions(runner)
@@ -51,7 +54,13 @@ def apply_gnome_extension(
                 return {"kind": "gnome_extension", "resource": uuid, "status": "kept", "reason": "drift_detected"}
         return {"kind": "gnome_extension", "resource": uuid, "status": "already_converged"}
     if dry_run:
-        return {"kind": "gnome_extension", "resource": uuid, "status": "would_install" if not known else "would_change", "version": version}
+        return {
+            "kind": "gnome_extension",
+            "resource": uuid,
+            "status": "would_install" if not known else "would_change",
+            "version": version,
+            "review_id": review_id,
+        }
 
     installed_now = False
     if not known:
@@ -61,7 +70,7 @@ def apply_gnome_extension(
         with tempfile.TemporaryDirectory(prefix="macubuntu-extension-") as tmp:
             tmp_path = Path(tmp)
             archive = tmp_path / "extension.zip"
-            url = EGO_DOWNLOAD.format(uuid=urllib.parse.quote(uuid, safe="@._-"), version=version)
+            url = EGO_REVIEW_DOWNLOAD.format(review_id=review_id)
             _download(url, archive, resource=uuid)
             extract = tmp_path / "extract"
             extract.mkdir()
@@ -69,9 +78,22 @@ def apply_gnome_extension(
             metadata_path = extract / "metadata.json"
             if not metadata_path.exists():
                 raise ExternalOperationError("extension_metadata_missing", uuid, "extension archive has no metadata.json")
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as exc:
+                raise ExternalOperationError("extension_metadata_invalid", uuid, str(exc)) from exc
             if metadata.get("uuid") != uuid:
                 raise ExternalOperationError("extension_uuid_mismatch", uuid, f"expected {uuid}, got {metadata.get('uuid')}")
+            try:
+                archive_version = int(metadata.get("version"))
+            except (TypeError, ValueError) as exc:
+                raise ExternalOperationError("extension_version_missing", uuid, "extension archive has no valid EGO version") from exc
+            if archive_version != version:
+                raise ExternalOperationError(
+                    "extension_version_mismatch",
+                    uuid,
+                    f"expected EGO version {version}, review {review_id} contains version {archive_version}",
+                )
             supported = [str(value).split(".", 1)[0] for value in metadata.get("shell-version", [])]
             if shell_major not in supported:
                 raise ExternalOperationError("extension_incompatible", uuid, f"v{version} does not declare GNOME {shell_major}")
@@ -99,10 +121,17 @@ def apply_gnome_extension(
                 "path": str(user_dir) if installed_now else None,
                 "digest": _tree_digest(user_dir) if installed_now else None,
                 "version": version,
+                "review_id": review_id,
                 "shell_major": shell_major,
             })
         elif installed_now:
-            receipt.update({"installed_by_macubuntu": True, "path": str(user_dir), "digest": _tree_digest(user_dir), "version": version})
+            receipt.update({
+                "installed_by_macubuntu": True,
+                "path": str(user_dir),
+                "digest": _tree_digest(user_dir),
+                "version": version,
+                "review_id": review_id,
+            })
             store.save(state, app_version)
     except Exception:
         # Restore the user-visible state if ownership cannot be persisted.
@@ -117,5 +146,7 @@ def apply_gnome_extension(
     return {
         "kind": "gnome_extension", "resource": uuid,
         "status": "installed" if installed_now else "changed",
-        "version": version, "session_restart_required": True,
+        "version": version,
+        "review_id": review_id,
+        "session_restart_required": True,
     }

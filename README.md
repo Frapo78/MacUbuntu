@@ -23,7 +23,7 @@ Then run:
 ./macubuntu
 ```
 
-A bare launch is the beginner-friendly one-shot entry point. It performs the same flow as `macify`, shows a short plan and asks before changing the machine.
+A bare launch is the beginner-friendly one-shot entry point. It performs the same flow as `macify`, shows a short plan and asks before changing the machine. During the apply phase it shows a real module-by-module progress bar with short localized Italian/English messages. Progress reflects completed MacUbuntu modules rather than a timer or simulated animation.
 
 For unattended use by an AI agent or automation:
 
@@ -37,7 +37,7 @@ For technical terminal output:
 ./macubuntu macify --yes --verbose
 ```
 
-Normal mode deliberately hides APT, Flatpak and upstream-installer noise. `--verbose` streams technical subprocess output; failures still retain diagnostic stdout/stderr for JSON and troubleshooting.
+Normal mode deliberately hides APT, Flatpak and upstream-installer noise. `--verbose` keeps progress visible as stable step lines while streaming technical subprocess output. `--json` never mixes human progress text into the machine-readable response.
 
 ## What the v0.4 one-shot manages
 
@@ -52,9 +52,9 @@ MacUbuntu chooses established upstream projects and Ubuntu packages, pins extern
 | Cursor | WhiteSur cursors | Pinned upstream source under a MacUbuntu-specific name |
 | Wallpaper | WhiteSur wallpapers | Pinned 2K light/dark files with Git-blob integrity verification |
 | Typography | Inter | Ubuntu `fonts-inter`; open alternative rather than redistributing Apple fonts |
-| Shell polish | Blur my Shell | GNOME-version-pinned extension |
-| Shell controls | Just Perfection | GNOME-version-pinned extension, enabled without fragile opinionated key overrides |
-| Clipboard | Clipboard Indicator | GNOME-version-pinned extension |
+| Shell polish | Blur my Shell | GNOME-version-pinned extension with exact official EGO review artifact |
+| Shell controls | Just Perfection | GNOME-version-pinned extension with exact official EGO review artifact; enabled without fragile opinionated key overrides |
+| Clipboard | Clipboard Indicator | GNOME-version-pinned extension with exact official EGO review artifact |
 | X11 gestures | Touchégg + X11 Gestures | Only on X11; stable Touchégg PPA when required; legacy pre-existing Touchégg is not silently replaced |
 | Spotlight-like launcher | Ulauncher | Stable official PPA when needed; reversible user service when available, otherwise a MacUbuntu-owned autostart file |
 | AirDrop-like LAN sharing | Warpinator (Linux Mint) | Verified user Flatpak from Flathub; encrypted LAN sharing; user must choose a private group code for secure mode |
@@ -73,8 +73,8 @@ MacUbuntu follows a few non-negotiable rules:
 - **ownership** — pre-existing packages/files/extensions stay user-owned;
 - **receipts** — a component is removed only when MacUbuntu has evidence that it installed or changed it;
 - **drift protection** — user changes made after MacUbuntu are preserved by safe uninstall;
-- **pinned external sources** — source archives and GNOME extension versions are selected by MacUbuntu releases instead of tracking arbitrary upstream `master`/`latest` state;
-- **archive safety** — downloaded ZIPs are path-checked, size-limited and symlink entries are rejected;
+- **pinned external sources** — source archives and GNOME extension artifacts are selected by MacUbuntu releases instead of tracking arbitrary upstream `master`/`latest` state;
+- **archive safety** — downloaded ZIPs are path-checked and size/member-limited; only relative symlinks proven to remain inside the extraction root are preserved, while escaping links, traversal and special files are rejected;
 - **source allowlist** — runtime source downloads are restricted to the expected HTTPS upstream hosts;
 - **no hidden hardware surgery** — GPU/driver/firmware/boot/disk operations are not part of the normal macification path;
 - **quiet by default** — technical command output is opt-in with `--verbose`;

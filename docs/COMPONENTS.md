@@ -25,6 +25,7 @@ MacUbuntu does not automatically install abandoned global-menu hacks, boot theme
 - Pin: `bab5833b5cae200bccb786a2d3d6afa2201e7806`
 - Install scope: user icon directory
 - MacUbuntu name prefix: `MacUbuntu-WhiteSur`
+- Archive note: the reviewed source contains 27,864 ZIP entries, so this component has an explicit 30,000-member extraction ceiling while the normal ceiling remains 20,000. All other archive checks remain active.
 
 ### WhiteSur cursors
 
@@ -42,15 +43,15 @@ MacUbuntu does not automatically install abandoned global-menu hacks, boot theme
 
 ## GNOME extension compatibility pins
 
-Extension ZIPs are downloaded from `extensions.gnome.org`, then MacUbuntu validates `metadata.json`, UUID and declared GNOME major before copying anything to the user extension directory.
+Extension ZIPs are downloaded from `extensions.gnome.org`. MacUbuntu pins both the EGO version and the exact official review artifact ID, then validates `metadata.json`, UUID, EGO version and declared GNOME major before copying anything to the user extension directory.
 
 | Extension | UUID | GNOME 42 | GNOME 46 |
 |---|---|---:|---:|
-| Blur my Shell | `blur-my-shell@aunetx` | EGO v47 | EGO v72 |
-| Just Perfection | `just-perfection-desktop@just-perfection` | EGO v26 | EGO v36 |
-| Clipboard Indicator | `clipboard-indicator@tudmotu.com` | EGO v47 | EGO v71 |
-| X11 Gestures | `x11gestures@joseexposito.github.io` | EGO v17 | EGO v25 |
-| GSConnect | `gsconnect@andyholmes.github.io` | EGO v68 | EGO v72 |
+| Blur my Shell | `blur-my-shell@aunetx` | EGO v47 / review 42627 | EGO v72 / review 69740 |
+| Just Perfection | `just-perfection-desktop@just-perfection` | EGO v26 / review 43626 | EGO v36 / review 68110 |
+| Clipboard Indicator | `clipboard-indicator@tudmotu.com` | EGO v47 / review 43380 | EGO v71 / review 70694 |
+| X11 Gestures | `x11gestures@joseexposito.github.io` | EGO v17 / review 41094 | EGO v25 / review 63139 |
+| GSConnect | `gsconnect@andyholmes.github.io` | EGO v68 / review 66552 | EGO v72 / review 70399 |
 
 Unsupported GNOME majors are skipped; MacUbuntu does not guess a compatible extension build.
 
@@ -108,7 +109,7 @@ LocalSend was evaluated because it is popular and cross-platform, but MacUbuntu 
 
 ## Runtime download security
 
-Third-party runtime downloads are HTTPS-only and limited to the reviewed hosts needed by this release (`github.com`, `codeload.github.com`, `raw.githubusercontent.com`, `extensions.gnome.org`). ZIP extraction rejects traversal paths and symlink entries and enforces archive size/member limits.
+Third-party runtime downloads are HTTPS-only and limited to the reviewed hosts needed by this release (`github.com`, `codeload.github.com`, `raw.githubusercontent.com`, `extensions.gnome.org`). ZIP extraction rejects traversal paths, escaping/absolute symlinks and special files. Relative symlinks are preserved only when their lexical target remains inside the extraction root and no archive member writes through them. Archive size/member limits remain enforced, with component-specific overrides bounded by a hard global ceiling.
 
 A failed or incomplete third-party installer must not receive a receipt. Where an installer creates new entries under a MacUbuntu-owned destination, unexpected new names trigger cleanup and a controlled failure.
 
