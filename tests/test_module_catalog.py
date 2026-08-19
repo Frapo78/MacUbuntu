@@ -15,8 +15,10 @@ class ModuleCatalogTests(unittest.TestCase):
             "appearance.mactahoe",
             "appearance.wallpapers",
             "shell.enhancements",
+            "spaces.fullscreen",
             "gestures.x11",
             "spotlight.ulauncher",
+            "keyboard.press-hold-accents",
             "sharing.warpinator",
             "phone.integration",
         }:
