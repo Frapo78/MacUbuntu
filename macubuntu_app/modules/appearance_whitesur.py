@@ -22,6 +22,11 @@ class AppearanceWhiteSurModule:
     CURSOR_REPO = "vinceliuice/WhiteSur-cursors"
     CURSOR_COMMIT = "e190baf618ed95ee217d2fd45589bd309b37672b"
 
+    # The pinned WhiteSur icon source archive contains 27,864 ZIP entries.
+    # Keep the global archive ceiling conservative and raise it only for this
+    # known, pinned upstream component.
+    ICON_ARCHIVE_MAX_MEMBERS = 30000
+
     dependencies = ["sassc", "libglib2.0-dev-bin", "libxml2-utils", "gnome-shell-extensions"]
 
     @property
@@ -76,6 +81,7 @@ class AppearanceWhiteSurModule:
             destination=self.icons_dir, owned_prefix="MacUbuntu-WhiteSur",
             command=["bash", "{root}/install.sh", "-d", "{dest}", "-n", "MacUbuntu-WhiteSur"],
             required_paths=["MacUbuntu-WhiteSur"], dry_run=dry_run,
+            archive_max_members=self.ICON_ARCHIVE_MAX_MEMBERS,
         )
         results.append(icon_result)
         cursor_result = apply_pinned_subdir_copy(
