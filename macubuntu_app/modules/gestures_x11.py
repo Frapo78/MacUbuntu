@@ -14,7 +14,10 @@ class GesturesX11Module:
     title = "Mac-style multi-touch gestures on X11"
     PPA = "ppa:touchegg/stable"
     UUID = "x11gestures@joseexposito.github.io"
-    VERSIONS = {"42": 17, "46": 25}
+    PINS = {
+        "42": {"version": 17, "review_id": 41094},
+        "46": {"version": 25, "review_id": 63139},
+    }
 
     def _legacy_conflict(self, runner: Runner) -> bool:
         version = package_version(runner, "touchegg")
@@ -24,8 +27,8 @@ class GesturesX11Module:
         if session_type() != "x11":
             return [{"module": self.id, "kind": "session", "resource": "X11 gestures", "action": "skip", "reason": "wayland_or_unknown_session"}]
         major = shell_major(runner)
-        version = self.VERSIONS.get(major or "")
-        if version is None:
+        pin = self.PINS.get(major or "")
+        if pin is None:
             return [{"module": self.id, "kind": "gnome_extension", "resource": "X11 Gestures", "action": "skip", "reason": "unsupported_gnome_version"}]
         if self._legacy_conflict(runner):
             return [{"module": self.id, "kind": "package", "resource": "touchegg", "action": "skip", "reason": "legacy_touchegg_preinstalled"}]
@@ -45,15 +48,23 @@ class GesturesX11Module:
             extension_action = "install"
         else:
             extension_action = "keep" if gnome_extension_enabled(runner, self.UUID) else "set"
-        changes.append({"module": self.id, "kind": "gnome_extension", "resource": "X11 Gestures", "uuid": self.UUID, "version": version, "action": extension_action})
+        changes.append({
+            "module": self.id,
+            "kind": "gnome_extension",
+            "resource": "X11 Gestures",
+            "uuid": self.UUID,
+            "version": int(pin["version"]),
+            "review_id": int(pin["review_id"]),
+            "action": extension_action,
+        })
         return changes
 
     def apply(self, *, runner: Runner, store: StateStore, state: dict[str, Any], app_version: str, dry_run: bool) -> list[dict[str, Any]]:
         if session_type() != "x11":
             return [{"kind": "session", "resource": "X11 gestures", "status": "skipped", "reason": "wayland_or_unknown_session"}]
         major = shell_major(runner)
-        version = self.VERSIONS.get(major or "")
-        if version is None:
+        pin = self.PINS.get(major or "")
+        if pin is None:
             return [{"kind": "gnome_extension", "resource": self.UUID, "status": "skipped", "reason": "unsupported_gnome_version"}]
         if self._legacy_conflict(runner):
             return [{"kind": "package", "resource": "touchegg", "status": "skipped", "reason": "legacy_touchegg_preinstalled"}]
@@ -64,5 +75,15 @@ class GesturesX11Module:
             results.append(apply_apt_repository(runner=runner, store=store, state=state, app_version=app_version, ppa=self.PPA, dry_run=dry_run))
         results.append(apply_apt_bundle(runner=runner, store=store, state=state, app_version=app_version, requested=["touchegg"], dry_run=dry_run))
         results.append(apply_service_state(runner=runner, store=store, state=state, app_version=app_version, unit="touchegg.service", user=False, dry_run=dry_run))
-        results.append(apply_gnome_extension(runner=runner, store=store, state=state, app_version=app_version, uuid=self.UUID, version=version, shell_major=str(major), dry_run=dry_run))
+        results.append(apply_gnome_extension(
+            runner=runner,
+            store=store,
+            state=state,
+            app_version=app_version,
+            uuid=self.UUID,
+            version=int(pin["version"]),
+            review_id=int(pin["review_id"]),
+            shell_major=str(major),
+            dry_run=dry_run,
+        ))
         return results
