@@ -26,7 +26,14 @@ class CLITests(unittest.TestCase):
         cp = self.run_cli("--help")
         self.assertEqual(cp.returncode, 0)
         self.assertIn("macify", cp.stdout)
+        self.assertIn("update", cp.stdout)
         self.assertIn("uninstall", cp.stdout)
+
+    def test_update_help_is_localized(self):
+        cp = self.run_cli("update", "--lang", "it", "--help")
+        self.assertEqual(cp.returncode, 0)
+        self.assertIn("controlla soltanto", cp.stdout)
+        self.assertIn("--check", cp.stdout)
 
     def test_italian_help_can_be_selected(self):
         cp = self.run_cli("--lang", "it", "--help")
@@ -69,7 +76,7 @@ class CLITests(unittest.TestCase):
     def test_version(self):
         cp = self.run_cli("--version")
         self.assertEqual(cp.returncode, 0)
-        self.assertIn("0.1.0", cp.stdout)
+        self.assertIn("0.2.0", cp.stdout)
 
 
 if __name__ == "__main__":
