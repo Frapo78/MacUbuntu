@@ -1,0 +1,167 @@
+# MacUbuntu
+
+**Turn Ubuntu GNOME into a mac-style desktop with one reversible tool.**
+
+MacUbuntu is an open-source configuration engine for people who want the workflow, interaction model and visual conventions of a modern Mac while keeping Ubuntu underneath.
+
+The project is deliberately more than a theme installer. Its goal is to provide one main application that can:
+
+- audit the machine and desktop session;
+- explain what is supported and what would change;
+- install only the packages that are missing;
+- configure GNOME in a mac-style, module by module;
+- keep a receipt of every managed mutation;
+- detect configuration drift;
+- report its state in human-readable or JSON form;
+- undo only what MacUbuntu actually changed.
+
+> **Status: alpha / v0.1 foundation.** The reversible core is usable now. Appearance, gestures, launcher, sharing and device-integration modules are being moved into the same transaction model instead of being shipped as unrelated shell scripts.
+
+## Quick start
+
+```bash
+git clone https://github.com/Frapo78/MacUbuntu.git
+cd MacUbuntu
+./macubuntu audit
+./macubuntu plan
+./macubuntu apply --yes
+```
+
+To see what MacUbuntu owns:
+
+```bash
+./macubuntu status
+```
+
+To restore the recorded pre-MacUbuntu state:
+
+```bash
+./macubuntu uninstall --yes
+```
+
+If a managed setting was manually changed after MacUbuntu applied it, uninstall protects that newer user choice and reports drift. A deliberate full restore can be requested with:
+
+```bash
+./macubuntu uninstall --yes --force
+```
+
+## One-command use
+
+Once the repository is cloned, the main entry point is always `./macubuntu`. No Python virtual environment or third-party Python package is required for the current core.
+
+For an unattended run by an automation or AI agent:
+
+```bash
+./macubuntu --json audit
+./macubuntu --json plan
+./macubuntu --json apply --yes
+```
+
+The JSON interface is intended to remain stable enough for agents and higher-level installers to reason about support, planned changes and rollback state.
+
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `audit` | Inspect OS, GNOME, session, hardware identifier, packages and current settings |
+| `plan` | Show the exact changes that would be made |
+| `apply` | Apply supported mac-style modules |
+| `status` | Show the operation receipt MacUbuntu currently owns |
+| `uninstall` | Restore recorded settings and safely remove packages installed by MacUbuntu |
+
+Global options:
+
+```text
+--json       machine-readable output
+--dry-run    execute detection and planning without mutations
+--version    show the MacUbuntu version
+```
+
+## What v0.1 configures
+
+The first module, `core.gnome`, intentionally uses Ubuntu/GNOME components before adding external projects. It currently manages:
+
+- GNOME Sushi for Space-bar file previews, similar to Quick Look;
+- bottom-centered Ubuntu/Dash-to-Dock behavior where that schema is available;
+- mac-style window control placement on the left;
+- natural scrolling, tap-to-click and two-finger trackpad scrolling;
+- GNOME animations and a compact mac-like clock behavior.
+
+All settings are feature-detected. A missing GNOME schema or key is skipped rather than treated as a reason to damage or downgrade the desktop.
+
+## Reversibility model
+
+MacUbuntu stores state under the XDG state directory, normally:
+
+```text
+~/.local/state/macubuntu/
+├── state.json
+└── logs/
+```
+
+Every mutation is recorded with enough information to reverse it. For example, a GNOME setting receipt contains its original and applied values. A package receipt exists only when MacUbuntu was the component that installed that package.
+
+During uninstall, operations are replayed in reverse. MacUbuntu refuses to silently overwrite a setting that has drifted after installation unless `--force` is explicitly supplied. Package removal is simulated first; if removing a MacUbuntu-installed package would now remove unrelated packages, the safe uninstall reports the conflict instead of proceeding blindly.
+
+This receipt model is the foundation for upcoming theme files, GNOME extensions, repositories and user services.
+
+## Planned modules
+
+The roadmap is organized around user-visible Mac capabilities rather than random tweaks:
+
+- `appearance.whitesur` — GTK/Shell theme, icons and cursor with upstream-aware uninstall;
+- `gestures.x11` — Touchégg + GNOME X11 Gestures with session detection;
+- `gestures.wayland` — native/desktop-supported gesture path where available;
+- `finder.nautilus` — Finder-like Nautilus behavior, previews and services;
+- `spotlight.launcher` — fast global app/file/action launcher;
+- `spaces.workspaces` — Mission Control/Spaces conventions;
+- `keyboard.macos` — mac-oriented shortcuts and modifier conventions;
+- `sharing.local` — AirDrop-like LAN sharing using open protocols;
+- `phone.integration` — phone notifications, file transfer and clipboard where supported;
+- `desktop.polish` — fonts, panel, dock and visual consistency;
+- `power.portable` — conservative laptop power tuning, kept separate from graphics drivers.
+
+Hardware driver changes, bootloader changes and GPU troubleshooting are outside the default MacUbuntu transformation path.
+
+## Supported systems
+
+The initial target is **Ubuntu GNOME 22.04 and 24.04**. Other Ubuntu/GNOME combinations are detected as experimental rather than rejected outright.
+
+The architecture is intentionally module-based so support for newer Ubuntu/GNOME releases can be added without rewriting the application.
+
+## For AI agents
+
+Read [`AGENTS.md`](AGENTS.md). The short version is:
+
+1. run `./macubuntu --json audit`;
+2. run `./macubuntu --json plan`;
+3. inspect the plan and support level;
+4. run `./macubuntu --json apply --yes` only when appropriate;
+5. never edit `state.json` manually;
+6. use `status` and `uninstall` rather than guessing what was changed.
+
+## Design principles
+
+1. **Audit before mutation.**
+2. **Idempotence.** Running `apply` again should converge, not duplicate work.
+3. **Ownership.** Never uninstall a package merely because MacUbuntu knows about it; remove it only if MacUbuntu installed it.
+4. **Rollback receipts.** Record the previous state immediately after each successful mutation.
+5. **Feature detection.** Check schemas, packages and session capabilities instead of assuming them.
+6. **No opaque mega-script.** A one-command UX may orchestrate many modules, but each module remains independently diagnosable.
+7. **Agent-friendly output.** Important decisions must be available as structured data.
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the internal model.
+
+## Upstream projects
+
+MacUbuntu integrates or plans to integrate upstream open-source projects rather than redistributing Apple software. Relevant projects include GNOME, Ubuntu, WhiteSur, Touchégg and GNOME X11 Gestures. Their own licenses and trademarks remain theirs.
+
+## Trademark notice
+
+MacUbuntu is an independent community project and is not affiliated with, endorsed by or sponsored by Apple Inc. or Canonical Ltd. macOS, Mac and related Apple marks belong to Apple Inc. Ubuntu is a trademark of Canonical Ltd.
+
+MacUbuntu does not ship proprietary Apple operating-system files.
+
+## License
+
+MacUbuntu's own source code is released under the [MIT License](LICENSE). Third-party components installed by modules remain under their respective licenses.
