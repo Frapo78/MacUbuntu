@@ -101,10 +101,11 @@ def run_doctor(runner: Runner, store: StateStore, root: Path) -> dict[str, Any]:
         checks.append(_check("privilege", FAIL, "sudo_missing"))
 
     state_health = store.health()
+    state_data = {key: value for key, value in state_health.items() if key not in {"ok", "status"}}
     if state_health["ok"]:
-        checks.append(_check("state", PASS, state_health["status"], **state_health))
+        checks.append(_check("state", PASS, state_health["status"], **state_data))
     else:
-        checks.append(_check("state", FAIL, state_health["status"], **state_health))
+        checks.append(_check("state", FAIL, state_health["status"], **state_data))
 
     try:
         free_bytes = shutil.disk_usage(Path.home()).free
