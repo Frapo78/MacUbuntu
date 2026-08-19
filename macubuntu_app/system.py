@@ -15,31 +15,38 @@ def _cmd_version(runner: Runner, args: list[str]) -> str | None:
     return text.splitlines()[0] if text else None
 
 
-def gsettings_schema_exists(runner: Runner, schema: str) -> bool:
+def _gsettings_base(schema_dir: str | Path | None = None) -> list[str]:
+    command = ["gsettings"]
+    if schema_dir is not None:
+        command.extend(["--schemadir", str(schema_dir)])
+    return command
+
+
+def gsettings_schema_exists(runner: Runner, schema: str, schema_dir: str | Path | None = None) -> bool:
     if not runner.exists("gsettings"):
         return False
-    cp = runner.run(["gsettings", "list-schemas"], check=False)
+    cp = runner.run(_gsettings_base(schema_dir) + ["list-schemas"], check=False)
     return schema in (cp.stdout or "").splitlines()
 
 
-def gsettings_key_exists(runner: Runner, schema: str, key: str) -> bool:
-    if not gsettings_schema_exists(runner, schema):
+def gsettings_key_exists(runner: Runner, schema: str, key: str, schema_dir: str | Path | None = None) -> bool:
+    if not gsettings_schema_exists(runner, schema, schema_dir):
         return False
-    cp = runner.run(["gsettings", "list-keys", schema], check=False)
+    cp = runner.run(_gsettings_base(schema_dir) + ["list-keys", schema], check=False)
     return key in (cp.stdout or "").splitlines()
 
 
-def gsettings_get(runner: Runner, schema: str, key: str) -> str | None:
-    if not gsettings_key_exists(runner, schema, key):
+def gsettings_get(runner: Runner, schema: str, key: str, schema_dir: str | Path | None = None) -> str | None:
+    if not gsettings_key_exists(runner, schema, key, schema_dir):
         return None
-    cp = runner.run(["gsettings", "get", schema, key], check=False)
+    cp = runner.run(_gsettings_base(schema_dir) + ["get", schema, key], check=False)
     if cp.returncode != 0:
         return None
     return (cp.stdout or "").strip()
 
 
-def gsettings_set(runner: Runner, schema: str, key: str, value: str) -> None:
-    runner.run(["gsettings", "set", schema, key, value])
+def gsettings_set(runner: Runner, schema: str, key: str, value: str, schema_dir: str | Path | None = None) -> None:
+    runner.run(_gsettings_base(schema_dir) + ["set", schema, key, value])
 
 
 def audit_system(runner: Runner) -> dict[str, Any]:
