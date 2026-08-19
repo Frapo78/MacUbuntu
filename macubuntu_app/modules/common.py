@@ -30,17 +30,8 @@ def package_change(runner: Runner, package: str, module: str) -> dict[str, Any]:
     }
 
 
-def setting_change(
-    runner: Runner,
-    module: str,
-    schema: str,
-    key: str,
-    desired: str,
-    description: str,
-    *,
-    schema_dir: str | Path | None = None,
-) -> dict[str, Any]:
-    current = gsettings_get(runner, schema, key, schema_dir)
+def setting_change(runner: Runner, module: str, schema: str, key: str, desired: str, description: str) -> dict[str, Any]:
+    current = gsettings_get(runner, schema, key)
     if current is None:
         action = "skip"
     elif current == desired:
