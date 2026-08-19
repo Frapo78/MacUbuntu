@@ -14,8 +14,24 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def default_profile() -> dict[str, Any]:
+    return {
+        "applied": False,
+        "applied_at": None,
+        "last_apply_at": None,
+        "version": None,
+    }
+
+
 def default_state() -> dict[str, Any]:
-    return {"schema_version": SCHEMA_VERSION, "app_version": None, "created_at": None, "updated_at": None, "operations": []}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "app_version": None,
+        "created_at": None,
+        "updated_at": None,
+        "profile": default_profile(),
+        "operations": [],
+    }
 
 
 class StateStore:
@@ -30,6 +46,9 @@ class StateStore:
         if data.get("schema_version") != SCHEMA_VERSION:
             raise RuntimeError(f"unsupported state schema: {data.get('schema_version')}")
         data.setdefault("operations", [])
+        profile = data.setdefault("profile", default_profile())
+        for key, value in default_profile().items():
+            profile.setdefault(key, value)
         return data
 
     def save(self, state: dict[str, Any], app_version: str) -> None:
@@ -43,6 +62,8 @@ class StateStore:
 
     def remove_if_empty(self, state: dict[str, Any]) -> None:
         if state.get("operations"):
+            return
+        if state.get("profile", {}).get("applied"):
             return
         try:
             self.path.unlink()

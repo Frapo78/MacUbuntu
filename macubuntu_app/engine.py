@@ -5,7 +5,7 @@ from typing import Any
 from . import __version__
 from .modules import ALL_MODULES
 from .operations import uninstall_operations
-from .state import StateStore
+from .state import StateStore, now_iso
 from .system import audit_system
 from .util import Runner
 
@@ -65,6 +65,15 @@ class Engine:
                 item["module"] = module.id
             results.extend(module_results)
 
+        if not dry_run:
+            profile = state.setdefault("profile", {})
+            if not profile.get("applied_at"):
+                profile["applied_at"] = now_iso()
+            profile["applied"] = True
+            profile["last_apply_at"] = now_iso()
+            profile["version"] = __version__
+            self.store.save(state, __version__)
+
         return {
             "ok": True,
             "dry_run": dry_run,
@@ -74,10 +83,16 @@ class Engine:
 
     def status(self) -> dict[str, Any]:
         state = self.store.load()
+        plan = self.plan()
+        summary = plan["summary"]
+        owned_operations = len(state.get("operations", []))
         return {
             "state_file": str(self.store.path),
-            "managed": bool(state.get("operations")),
-            "operation_count": len(state.get("operations", [])),
+            "profile_applied": bool(state.get("profile", {}).get("applied")),
+            "converged": summary["install"] == 0 and summary["set"] == 0,
+            "managed": bool(owned_operations),
+            "operation_count": owned_operations,
+            "plan_summary": summary,
             "state": state,
         }
 
@@ -88,7 +103,8 @@ class Engine:
         dry_run: bool = False,
     ) -> dict[str, Any]:
         state = self.store.load()
-        if not state.get("operations"):
+        profile_applied = bool(state.get("profile", {}).get("applied"))
+        if not state.get("operations") and not profile_applied:
             return {
                 "ok": True,
                 "dry_run": dry_run,
@@ -96,14 +112,42 @@ class Engine:
                 "message": "nothing_managed",
             }
 
-        results = uninstall_operations(
-            runner=self.runner,
-            store=self.store,
-            state=state,
-            app_version=__version__,
-            force=force,
-            dry_run=dry_run,
-        )
+        results: list[dict[str, Any]] = []
+        if state.get("operations"):
+            results.extend(
+                uninstall_operations(
+                    runner=self.runner,
+                    store=self.store,
+                    state=state,
+                    app_version=__version__,
+                    force=force,
+                    dry_run=dry_run,
+                )
+            )
+
+        blockers = any(item.get("status") in {"kept", "skipped"} for item in results)
+        remaining_operations = bool(state.get("operations"))
+
+        if profile_applied:
+            if dry_run:
+                results.append({
+                    "kind": "profile",
+                    "resource": "default",
+                    "status": "would_clear" if not blockers and not remaining_operations else "would_keep",
+                    "reason": None if not blockers and not remaining_operations else "owned_operations_remain",
+                })
+            elif not remaining_operations:
+                profile = state.setdefault("profile", {})
+                profile["applied"] = False
+                profile["last_uninstall_at"] = now_iso()
+                self.store.save(state, __version__)
+                self.store.remove_if_empty(state)
+                results.append({
+                    "kind": "profile",
+                    "resource": "default",
+                    "status": "cleared",
+                })
+
         return {
             "ok": True,
             "dry_run": dry_run,
