@@ -91,14 +91,20 @@ class ProgressUI:
                 print(line, file=self.stream, flush=True)
             return
 
-        if phase == "finish":
-            if index >= total:
-                line = self._line(total, total, _PHRASES[self.language]["complete"])
-                if self.tty and not self.verbose:
-                    print("\r" + line, file=self.stream, flush=True)
-                    self._line_open = False
-                else:
-                    print(line, file=self.stream, flush=True)
+        if phase == "error":
+            # Ensure the subsequent localized error starts on a clean line.
+            if self._line_open:
+                print(file=self.stream, flush=True)
+                self._line_open = False
+            return
+
+        if phase == "finish" and index >= total:
+            line = self._line(total, total, _PHRASES[self.language]["complete"])
+            if self.tty and not self.verbose:
+                print("\r" + line, file=self.stream, flush=True)
+                self._line_open = False
+            else:
+                print(line, file=self.stream, flush=True)
 
     def close(self) -> None:
         if self._line_open:
