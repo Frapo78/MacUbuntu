@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+from pathlib import Path
 
 # The command runner reads this before the CLI constructs the engine. Normal
 # runs capture subprocess noise; --verbose deliberately streams technical output.
@@ -10,6 +11,7 @@ if "--verbose" in sys.argv[1:]:
 
 from macubuntu_app import __version__
 from macubuntu_app.cli import main
+from macubuntu_app.doctor import run_doctor
 from macubuntu_app.engine import Engine
 from macubuntu_app.i18n import Translator, detect_language
 from macubuntu_app.privilege import SudoSession, plan_requires_admin
@@ -43,6 +45,19 @@ def _language(args: list[str]) -> str:
 
 def _command(args: list[str]) -> str | None:
     return next((token for token in args if token in COMMANDS), None)
+
+
+def _preflight_allows_confirmation(command: str | None) -> bool:
+    if command not in {"apply", "macify"}:
+        return True
+    engine = Engine()
+    root = Path(__file__).resolve().parent
+    try:
+        return bool(run_doctor(engine.runner, engine.store, root).get("ok"))
+    except Exception:
+        # Let the normal CLI path render the real diagnostic rather than
+        # introducing a second error-reporting implementation here.
+        return False
 
 
 def _confirm_apply_once(args: list[str], language: str) -> tuple[list[str], bool]:
@@ -94,6 +109,9 @@ def _run(args: list[str]) -> int:
         return main(args)
 
     language = _language(args)
+    if not _preflight_allows_confirmation(command):
+        return main(args)
+
     args, confirmed = _confirm_apply_once(args, language)
     if not confirmed:
         return 2
