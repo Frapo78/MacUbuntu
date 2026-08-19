@@ -13,6 +13,7 @@ from .i18n import Translator, detect_language
 from .locking import AppLock, LockBusyError
 from .state import StateError
 from .updater import update_checkout
+from .util import CommandError
 
 
 def _requested_language(argv: list[str] | None) -> str:
@@ -280,6 +281,8 @@ def _print_global_error(data: dict[str, Any], t: Translator, verbose: bool) -> N
     elif data.get("status") == "state_error":
         key = f"state_error_{data.get('code', 'state_error')}"
         print(f"! {t(key)}")
+    elif data.get("status") == "command_failed":
+        print(f"! {t('command_failed')}")
     else:
         print("! MacUbuntu error")
     if verbose:
@@ -360,10 +363,19 @@ def main(argv: list[str] | None = None) -> int:
             "path": str(exc.path),
             "error": str(exc),
         }
+    except CommandError as exc:
+        data = {
+            "ok": False,
+            "status": "command_failed",
+            "command": exc.args_list,
+            "returncode": exc.returncode,
+            "stdout": exc.stdout[-4000:],
+            "stderr": exc.stderr[-4000:],
+        }
 
     if args.json:
         _emit_json(args.command, data, language, args.verbose)
-    elif data.get("status") in {"busy", "state_error"}:
+    elif data.get("status") in {"busy", "state_error", "command_failed"}:
         _print_global_error(data, t, args.verbose)
     elif data.get("status") == "preflight_failed":
         _print_doctor(data["doctor"], t, args.verbose)
