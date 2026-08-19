@@ -27,6 +27,14 @@ cd MacUbuntu
 ./macubuntu apply --yes
 ```
 
+Or run the complete safe transformation flow in one command:
+
+```bash
+./macubuntu macify --yes
+```
+
+This performs audit → plan → apply. It still refuses an unsupported system and every mutation is recorded for uninstall.
+
 To see what MacUbuntu owns:
 
 ```bash
@@ -54,7 +62,8 @@ For an unattended run by an automation or AI agent:
 ```bash
 ./macubuntu --json audit
 ./macubuntu --json plan
-./macubuntu --json apply --yes
+./macubuntu --json macify --yes
+./macubuntu --json status
 ```
 
 The JSON interface is intended to remain stable enough for agents and higher-level installers to reason about support, planned changes and rollback state.
@@ -66,6 +75,7 @@ The JSON interface is intended to remain stable enough for agents and higher-lev
 | `audit` | Inspect OS, GNOME, session, hardware identifier, packages and current settings |
 | `plan` | Show the exact changes that would be made |
 | `apply` | Apply supported mac-style modules |
+| `macify` | Audit, plan and apply in one autonomous run |
 | `status` | Show the operation receipt MacUbuntu currently owns |
 | `uninstall` | Restore recorded settings and safely remove packages installed by MacUbuntu |
 
@@ -95,13 +105,12 @@ MacUbuntu stores state under the XDG state directory, normally:
 
 ```text
 ~/.local/state/macubuntu/
-├── state.json
-└── logs/
+└── state.json
 ```
 
-Every mutation is recorded with enough information to reverse it. For example, a GNOME setting receipt contains its original and applied values. A package receipt exists only when MacUbuntu was the component that installed that package.
+Every mutation is recorded with enough information to reverse it. A GNOME setting receipt contains its original and applied values. For package installation, MacUbuntu snapshots the dpkg package set before and after the transaction and records the packages actually introduced by that transaction.
 
-During uninstall, operations are replayed in reverse. MacUbuntu refuses to silently overwrite a setting that has drifted after installation unless `--force` is explicitly supplied. Package removal is simulated first; if removing a MacUbuntu-installed package would now remove unrelated packages, the safe uninstall reports the conflict instead of proceeding blindly.
+During uninstall, operations are replayed in reverse. MacUbuntu refuses to silently overwrite a setting that has drifted after installation unless `--force` is explicitly supplied. Package removal is simulated first; if removing a MacUbuntu-installed bundle would now remove unrelated packages, the safe uninstall reports the conflict instead of proceeding blindly.
 
 This receipt model is the foundation for upcoming theme files, GNOME extensions, repositories and user services.
 
@@ -136,7 +145,7 @@ Read [`AGENTS.md`](AGENTS.md). The short version is:
 1. run `./macubuntu --json audit`;
 2. run `./macubuntu --json plan`;
 3. inspect the plan and support level;
-4. run `./macubuntu --json apply --yes` only when appropriate;
+4. run `./macubuntu --json macify --yes` only when appropriate;
 5. never edit `state.json` manually;
 6. use `status` and `uninstall` rather than guessing what was changed.
 
@@ -151,6 +160,14 @@ Read [`AGENTS.md`](AGENTS.md). The short version is:
 7. **Agent-friendly output.** Important decisions must be available as structured data.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the internal model.
+
+## Development
+
+The core intentionally uses the Python standard library only. Run the current test suite with:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
 
 ## Upstream projects
 
