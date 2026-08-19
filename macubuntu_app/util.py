@@ -118,7 +118,14 @@ def package_installed(runner: Runner, package: str) -> bool:
     return cp.returncode == 0 and (cp.stdout or "").startswith("ii")
 
 
-def apt_base_command() -> list[str]:
+def sudo_base_command() -> list[str]:
     if os.geteuid() == 0:
-        return ["apt-get"]
-    return ["sudo", "apt-get"]
+        return []
+    # Once the friendly upfront handshake succeeds, every later sudo call is
+    # deliberately non-interactive. This prevents a surprise password prompt
+    # from appearing in the middle of the one-shot progress UI.
+    return ["sudo", "-n"] if os.environ.get("MACUBUNTU_SUDO_READY") == "1" else ["sudo"]
+
+
+def apt_base_command() -> list[str]:
+    return sudo_base_command() + ["apt-get"]
