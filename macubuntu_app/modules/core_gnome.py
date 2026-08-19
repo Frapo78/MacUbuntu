@@ -21,6 +21,10 @@ class CoreGnomeModule:
         ("org.gnome.desktop.interface", "enable-animations", "true", "desktop animations"),
         ("org.gnome.desktop.interface", "clock-show-date", "true", "show date in top bar"),
         ("org.gnome.desktop.interface", "clock-show-seconds", "false", "hide seconds in top bar"),
+        # GNOME persists the enabled-extension list in GSettings, but this
+        # master switch can disable every user extension after login.  Keep it
+        # explicitly enabled so MacUbuntu-managed extensions survive reboots.
+        ("org.gnome.shell", "disable-user-extensions", "false", "keep user extensions enabled across sessions"),
         ("org.gnome.shell.extensions.dash-to-dock", "dock-position", "'BOTTOM'", "bottom dock"),
         ("org.gnome.shell.extensions.dash-to-dock", "extend-height", "false", "floating dock width"),
         ("org.gnome.shell.extensions.dash-to-dock", "always-center-icons", "true", "center dock icons"),
