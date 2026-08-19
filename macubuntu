@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
+import json
 import os
 import sys
+from pathlib import Path
 
 # The command runner reads this before the CLI constructs the engine. Normal
 # runs capture subprocess noise; --verbose deliberately streams technical output.
 if "--verbose" in sys.argv[1:]:
     os.environ["MACUBUNTU_VERBOSE"] = "1"
 
+from macubuntu_app import __version__
 from macubuntu_app.cli import main
+from macubuntu_app.doctor import run_doctor
+from macubuntu_app.engine import Engine
+from macubuntu_app.i18n import Translator, detect_language
+from macubuntu_app.privilege import SudoSession, plan_requires_admin
 
 COMMANDS = {"audit", "doctor", "plan", "status", "apply", "macify", "update", "uninstall"}
 
@@ -27,5 +34,107 @@ def _beginner_args(args: list[str]) -> list[str]:
     return [*args, "macify"]
 
 
+def _language(args: list[str]) -> str:
+    for index, token in enumerate(args):
+        if token.startswith("--lang="):
+            return detect_language(token.split("=", 1)[1])
+        if token == "--lang" and index + 1 < len(args):
+            return detect_language(args[index + 1])
+    return detect_language()
+
+
+def _command(args: list[str]) -> str | None:
+    return next((token for token in args if token in COMMANDS), None)
+
+
+def _preflight_allows_confirmation(command: str | None) -> bool:
+    if command not in {"apply", "macify"}:
+        return True
+    engine = Engine()
+    root = Path(__file__).resolve().parent
+    try:
+        return bool(run_doctor(engine.runner, engine.store, root).get("ok"))
+    except Exception:
+        # Let the normal CLI path render the real diagnostic rather than
+        # introducing a second error-reporting implementation here.
+        return False
+
+
+def _confirm_apply_once(args: list[str], language: str) -> tuple[list[str], bool]:
+    """Confirm before sudo, then pass --yes so the CLI does not ask twice."""
+    command = _command(args)
+    if command not in {"apply", "macify"} or "--dry-run" in args or "--yes" in args or "--json" in args:
+        return args, True
+    if not sys.stdin.isatty():
+        return args, True  # The CLI preserves its existing non-TTY safety behavior.
+    t = Translator(language)
+    answer = input(f"{t('confirm_apply')} {t('yes_hint')} ").strip().lower()
+    if answer not in {"s", "si", "sì", "y", "yes"}:
+        print(t("cancelled"), file=sys.stderr)
+        return args, False
+    return [*args, "--yes"], True
+
+
+def _planned_admin_work(args: list[str]) -> bool:
+    command = _command(args)
+    if command not in {"apply", "macify"} or "--dry-run" in args:
+        return False
+    try:
+        plan = Engine().plan()
+    except Exception:
+        # Let the normal CLI error path explain planning failures.
+        return False
+    if plan.get("audit", {}).get("support", {}).get("level") == "unsupported":
+        return False
+    return plan_requires_admin(plan)
+
+
+def _emit_privilege_json(command: str, language: str, verbose: bool, session: SudoSession) -> None:
+    print(json.dumps({
+        "macubuntu_version": __version__,
+        "command": command,
+        "interface": {"language": language, "verbose": verbose},
+        "data": {
+            "ok": False,
+            "status": session.status,
+            "message": session.message,
+        },
+    }, indent=2, sort_keys=True))
+
+
+def _run(args: list[str]) -> int:
+    args = _beginner_args(args)
+    command = _command(args)
+    if command is None or "--help" in args or "-h" in args or "--version" in args:
+        return main(args)
+
+    language = _language(args)
+    if not _preflight_allows_confirmation(command):
+        return main(args)
+
+    args, confirmed = _confirm_apply_once(args, language)
+    if not confirmed:
+        return 2
+
+    required = _planned_admin_work(args)
+    if not required:
+        return main(args)
+
+    human = "--json" not in args
+    with SudoSession(
+        Engine().runner,
+        language=language,
+        required=True,
+        human=human,
+    ) as sudo_session:
+        if not sudo_session.ok:
+            if human:
+                print(f"! {sudo_session.message}")
+            else:
+                _emit_privilege_json(command, language, "--verbose" in args, sudo_session)
+            return 1
+        return main(args)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main(_beginner_args(sys.argv[1:])))
+    raise SystemExit(_run(sys.argv[1:]))
