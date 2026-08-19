@@ -43,15 +43,15 @@ MacUbuntu does not automatically install abandoned global-menu hacks, boot theme
 
 ## GNOME extension compatibility pins
 
-Extension ZIPs are downloaded from `extensions.gnome.org`. For the core Shell-enhancement set MacUbuntu pins both the EGO version and the exact official review artifact ID, then validates `metadata.json`, UUID, EGO version and declared GNOME major before copying anything to the user extension directory.
+Extension ZIPs are downloaded from `extensions.gnome.org`. MacUbuntu pins both the EGO version and the exact official review artifact ID, then validates `metadata.json`, UUID, EGO version and declared GNOME major before copying anything to the user extension directory.
 
 | Extension | UUID | GNOME 42 | GNOME 46 |
 |---|---|---:|---:|
 | Blur my Shell | `blur-my-shell@aunetx` | EGO v47 / review 42627 | EGO v72 / review 69740 |
 | Just Perfection | `just-perfection-desktop@just-perfection` | EGO v26 / review 43626 | EGO v36 / review 68110 |
 | Clipboard Indicator | `clipboard-indicator@tudmotu.com` | EGO v47 / review 43380 | EGO v71 / review 70694 |
-| X11 Gestures | `x11gestures@joseexposito.github.io` | EGO v17 | EGO v25 |
-| GSConnect | `gsconnect@andyholmes.github.io` | EGO v68 | EGO v72 |
+| X11 Gestures | `x11gestures@joseexposito.github.io` | EGO v17 / review 41094 | EGO v25 / review 63139 |
+| GSConnect | `gsconnect@andyholmes.github.io` | EGO v68 / review 66552 | EGO v72 / review 70399 |
 
 Unsupported GNOME majors are skipped; MacUbuntu does not guess a compatible extension build.
 
