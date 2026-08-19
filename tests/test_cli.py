@@ -1,19 +1,67 @@
+import os
 import subprocess
 import unittest
 from pathlib import Path
+
+from macubuntu_app.i18n import Translator, detect_language
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class CLITests(unittest.TestCase):
+    def run_cli(self, *args, env=None):
+        merged_env = os.environ.copy()
+        if env:
+            merged_env.update(env)
+        return subprocess.run(
+            [str(ROOT / "macubuntu"), *args],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=merged_env,
+        )
+
     def test_help(self):
-        cp = subprocess.run([str(ROOT / "macubuntu"), "--help"], cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        cp = self.run_cli("--help")
         self.assertEqual(cp.returncode, 0)
         self.assertIn("macify", cp.stdout)
         self.assertIn("uninstall", cp.stdout)
 
+    def test_italian_help_can_be_selected(self):
+        cp = self.run_cli("--lang", "it", "--help")
+        self.assertEqual(cp.returncode, 0)
+        self.assertIn("Trasforma Ubuntu GNOME", cp.stdout)
+        self.assertIn("mostra dettagli tecnici", cp.stdout)
+
+    def test_english_help_can_be_selected(self):
+        cp = self.run_cli("--lang", "en", "--help")
+        self.assertEqual(cp.returncode, 0)
+        self.assertIn("Turn Ubuntu GNOME", cp.stdout)
+        self.assertIn("show technical details", cp.stdout)
+
+    def test_locale_auto_selects_italian(self):
+        previous = os.environ.get("LANG")
+        previous_all = os.environ.pop("LC_ALL", None)
+        previous_messages = os.environ.pop("LC_MESSAGES", None)
+        try:
+            os.environ["LANG"] = "it_IT.UTF-8"
+            self.assertEqual(detect_language(), "it")
+        finally:
+            if previous is None:
+                os.environ.pop("LANG", None)
+            else:
+                os.environ["LANG"] = previous
+            if previous_all is not None:
+                os.environ["LC_ALL"] = previous_all
+            if previous_messages is not None:
+                os.environ["LC_MESSAGES"] = previous_messages
+
+    def test_translator_keeps_machine_independent_messages_separate(self):
+        self.assertNotEqual(Translator("it")("plan_nothing"), Translator("en")("plan_nothing"))
+
     def test_version(self):
-        cp = subprocess.run([str(ROOT / "macubuntu"), "--version"], cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        cp = self.run_cli("--version")
         self.assertEqual(cp.returncode, 0)
         self.assertIn("0.1.0", cp.stdout)
 
