@@ -54,10 +54,10 @@ _SPINNER = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"
 class ProgressUI:
     """Dependency-free progress renderer for human one-shot runs.
 
-    Percentages are based only on completed MacUbuntu modules.  While a long
+    Percentages are based only on completed MacUbuntu modules. While a long
     module is running, normal interactive mode animates a spinner and a pulse
-    in the unfinished portion of the bar.  This communicates liveness without
-    fabricating percentage progress.  Verbose/non-TTY modes remain stable and
+    in the unfinished portion of the bar. This communicates liveness without
+    fabricating percentage progress. Verbose/non-TTY modes remain stable and
     log-friendly, and JSON never instantiates this renderer.
     """
 
@@ -75,7 +75,9 @@ class ProgressUI:
         self.verbose = verbose
         self.stream = stream or sys.stdout
         self.width = max(10, int(width))
-        self.interval = max(0.05, float(interval))
+        # Keep the default deliberately calm, while allowing deterministic
+        # low-latency rendering in tests and fast interactive terminals.
+        self.interval = max(0.01, float(interval))
         detected_tty = bool(getattr(self.stream, "isatty", lambda: False)())
         self.tty = detected_tty if force_tty is None else bool(force_tty)
         self._line_open = False
