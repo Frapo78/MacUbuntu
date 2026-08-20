@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=MacUbuntu
+GenericName=Ubuntu mac-style configurator
+GenericName[it]=Configuratore Ubuntu in stile Mac
+Comment=Apply and manage a deep reversible mac-style Ubuntu transformation
+Comment[it]=Applica e gestisci una trasformazione profonda e reversibile di Ubuntu in stile Mac
+Exec=macubuntu-gui
+Icon=io.github.Frapo78.MacUbuntu
+Terminal=false
+Categories=Settings;Utility;
+Keywords=Ubuntu;GNOME;macOS;theme;desktop;
+StartupNotify=true
+DBusActivatable=false
