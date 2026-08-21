@@ -4,14 +4,14 @@ MacUbuntu now includes a Debian packaging foundation for supported Ubuntu LTS re
 
 ## Build
 
-Install the build dependency and build a binary package from a clean checkout:
+Install the build dependencies and build a binary package from a clean checkout:
 
 ```bash
-sudo apt-get install debhelper
+sudo apt-get install build-essential debhelper
 DPKG_DEB_COMPRESSOR_TYPE=gzip dpkg-buildpackage -us -uc -b
 ```
 
-The resulting `macubuntu_0.6.0-1_all.deb` installs the shared transaction engine under `/usr/lib/macubuntu`, exposes `macubuntu` and `macubuntu-gui` in `/usr/bin`, and installs the desktop launcher, AppStream metadata, scalable icon, architecture notes and third-party credits in standard system locations.
+The resulting `macubuntu_0.6.0_all.deb` installs the shared transaction engine under `/usr/lib/macubuntu`, exposes `macubuntu` and `macubuntu-gui` in `/usr/bin`, and installs the desktop launcher, AppStream metadata, scalable icon, architecture notes and third-party credits in standard system locations.
 
 ## Runtime dependencies
 
