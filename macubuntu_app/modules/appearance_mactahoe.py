@@ -6,6 +6,7 @@ from typing import Any
 
 from ..external import (
     apply_extension_state,
+    apply_managed_text_file,
     apply_pinned_installer,
     apply_pinned_subdir_copy,
     gnome_extension_enabled,
@@ -18,13 +19,7 @@ from .common import package_change, path_change, setting_change
 
 
 class AppearanceMacTahoeModule:
-    """Current macOS-inspired GTK/Shell appearance with conservative assets.
-
-    MacTahoe is used for the current window/Shell look.  The mature WhiteSur
-    icon/cursor sources remain the default icon stack for v0.5; this avoids
-    replacing a well-tested large icon transaction while still moving the
-    window chrome to the newer Tahoe design.
-    """
+    """Current macOS-inspired GTK/Shell appearance with conservative assets."""
 
     id = "appearance.mactahoe"
     title = "MacTahoe mac-style appearance and title bars"
@@ -38,11 +33,18 @@ class AppearanceMacTahoeModule:
     CURSOR_COMMIT = "e190baf618ed95ee217d2fd45589bd309b37672b"
     ICON_ARCHIVE_MAX_MEMBERS = 30000
 
+    GTK4_LIGHT_RESOURCE = "mactahoe-gtk4-user-css"
+    GTK4_DARK_RESOURCE = "mactahoe-gtk4-user-dark-css"
+
     dependencies = ["sassc", "libglib2.0-dev-bin", "libxml2-utils", "gnome-shell-extensions"]
 
     @property
     def data_home(self) -> Path:
         return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+
+    @property
+    def config_home(self) -> Path:
+        return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 
     @property
     def themes_dir(self) -> Path:
@@ -51,6 +53,18 @@ class AppearanceMacTahoeModule:
     @property
     def icons_dir(self) -> Path:
         return self.data_home / "icons"
+
+    @property
+    def gtk4_config_dir(self) -> Path:
+        return self.config_home / "gtk-4.0"
+
+    @property
+    def gtk4_css(self) -> Path:
+        return self.gtk4_config_dir / "gtk.css"
+
+    @property
+    def gtk4_dark_css(self) -> Path:
+        return self.gtk4_config_dir / "gtk-dark.css"
 
     @property
     def settings(self) -> list[tuple[str, str, str, str]]:
@@ -87,6 +101,12 @@ class AppearanceMacTahoeModule:
             ),
             (
                 "org.gnome.desktop.wm.preferences",
+                "titlebar-uses-system-font",
+                "false",
+                "use the MacUbuntu title-bar font instead of GNOME's system-font default",
+            ),
+            (
+                "org.gnome.desktop.wm.preferences",
                 "titlebar-font",
                 "'Inter Semi-Bold 11'",
                 "clean mac-like title-bar typography",
@@ -111,24 +131,81 @@ class AppearanceMacTahoeModule:
             ),
         ]
 
+    def _gtk4_import_css(self, *, dark: bool) -> str:
+        variant = "Dark" if dark else "Light"
+        source = (
+            self.themes_dir
+            / f"MacUbuntu-MacTahoe-{variant}-solid"
+            / "gtk-4.0"
+            / "gtk.css"
+        ).expanduser().resolve()
+        return (
+            "/* Managed by MacUbuntu. Do not edit: safe MacTahoe GTK4/libadwaita bridge. */\n"
+            f'@import url("{source.as_uri()}");\n'
+        )
+
+    @staticmethod
+    def _receipt_owns_path(state: dict[str, Any], resource: str, path: Path) -> bool:
+        wanted = str(path)
+        for op in state.get("operations", []):
+            if op.get("kind") != "owned_paths" or op.get("resource") != resource:
+                continue
+            return any(entry.get("path") == wanted for entry in op.get("paths", []))
+        return False
+
+    def _unmanaged_gtk4_css(self, state: dict[str, Any]) -> list[str]:
+        unmanaged: list[str] = []
+        for resource, path in (
+            (self.GTK4_LIGHT_RESOURCE, self.gtk4_css),
+            (self.GTK4_DARK_RESOURCE, self.gtk4_dark_css),
+        ):
+            if path.exists() and not self._receipt_owns_path(state, resource, path):
+                unmanaged.append(str(path))
+        return unmanaged
+
+    def _apply_gtk4_bridge(
+        self, *, store: StateStore, state: dict[str, Any], app_version: str, dry_run: bool
+    ) -> list[dict[str, Any]]:
+        unmanaged = self._unmanaged_gtk4_css(state)
+        if unmanaged:
+            return [{
+                "kind": "appearance",
+                "resource": "MacTahoe GTK4/libadwaita titlebar bridge",
+                "status": "skipped",
+                "reason": "preexisting_unmanaged_gtk4_css",
+                "paths": unmanaged,
+            }]
+        return [
+            apply_managed_text_file(
+                store=store,
+                state=state,
+                app_version=app_version,
+                resource=self.GTK4_LIGHT_RESOURCE,
+                path=self.gtk4_css,
+                content=self._gtk4_import_css(dark=False),
+                mode=0o644,
+                dry_run=dry_run,
+            ),
+            apply_managed_text_file(
+                store=store,
+                state=state,
+                app_version=app_version,
+                resource=self.GTK4_DARK_RESOURCE,
+                path=self.gtk4_dark_css,
+                content=self._gtk4_import_css(dark=True),
+                mode=0o644,
+                dry_run=dry_run,
+            ),
+        ]
+
     def plan(self, runner: Runner) -> list[dict[str, Any]]:
         changes = [package_change(runner, package, self.id) for package in self.dependencies]
         changes.extend([
-            path_change(
-                self.id,
-                "MacTahoe GTK",
-                self.themes_dir / "MacUbuntu-MacTahoe-Dark-solid",
-            ),
-            path_change(
-                self.id,
-                "WhiteSur icons",
-                self.icons_dir / "MacUbuntu-WhiteSur",
-            ),
-            path_change(
-                self.id,
-                "WhiteSur cursors",
-                self.icons_dir / "MacUbuntu-WhiteSur-cursors",
-            ),
+            path_change(self.id, "MacTahoe GTK", self.themes_dir / "MacUbuntu-MacTahoe-Dark-solid"),
+            path_change(self.id, "WhiteSur icons", self.icons_dir / "MacUbuntu-WhiteSur"),
+            path_change(self.id, "WhiteSur cursors", self.icons_dir / "MacUbuntu-WhiteSur-cursors"),
+            path_change(self.id, "MacTahoe GTK4/libadwaita light bridge", self.gtk4_css),
+            path_change(self.id, "MacTahoe GTK4/libadwaita dark bridge", self.gtk4_dark_css),
         ])
         changes.extend(setting_change(runner, self.id, *setting) for setting in self.settings)
 
@@ -192,6 +269,8 @@ class AppearanceMacTahoeModule:
                 "dark",
                 "-c",
                 "light",
+                "-a",
+                "normal",
                 "--round",
             ],
             required_paths=[
@@ -213,12 +292,7 @@ class AppearanceMacTahoeModule:
             destination=self.icons_dir,
             owned_prefix="MacUbuntu-WhiteSur",
             command=[
-                "bash",
-                "{root}/install.sh",
-                "-d",
-                "{dest}",
-                "-n",
-                "MacUbuntu-WhiteSur",
+                "bash", "{root}/install.sh", "-d", "{dest}", "-n", "MacUbuntu-WhiteSur",
             ],
             required_paths=["MacUbuntu-WhiteSur"],
             dry_run=dry_run,
@@ -239,10 +313,7 @@ class AppearanceMacTahoeModule:
         )
         results.append(cursor_result)
 
-        if any(
-            result.get("status") in {"skipped", "kept"}
-            for result in (gtk_result, icon_result, cursor_result)
-        ):
+        if any(result.get("status") in {"skipped", "kept"} for result in (gtk_result, icon_result, cursor_result)):
             results.append({
                 "kind": "appearance",
                 "resource": "MacTahoe activation",
@@ -250,6 +321,10 @@ class AppearanceMacTahoeModule:
                 "reason": "theme_assets_not_managed",
             })
             return results
+
+        results.extend(self._apply_gtk4_bridge(
+            store=store, state=state, app_version=app_version, dry_run=dry_run,
+        ))
 
         results.append(apply_extension_state(
             runner=runner,
