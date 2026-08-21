@@ -10,7 +10,7 @@
     <p>MacUbuntu provides an auditable, idempotent and reversible transformation layer for supported Ubuntu GNOME systems. The graphical application delegates all system changes to the same transaction engine and JSON contract used by the command line interface.</p>
     <p xml:lang="it">MacUbuntu offre un livello di trasformazione verificabile, idempotente e reversibile per i sistemi Ubuntu GNOME supportati. L'applicazione grafica delega tutte le modifiche allo stesso motore transazionale e allo stesso contratto JSON usati dall'interfaccia a riga di comando.</p>
   </description>
-  <developer id="io.github.Frapo78">
+  <developer id="io.github.frapo78">
     <name>Francesco Poltero</name>
   </developer>
   <launchable type="desktop-id">io.github.Frapo78.MacUbuntu.desktop</launchable>
