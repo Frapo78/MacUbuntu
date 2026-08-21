@@ -2,7 +2,7 @@ const GLib = imports.gi.GLib;
 const IBusManager = imports.misc.ibusManager;
 const Keyboard = imports.ui.status.keyboard;
 
-const ENGINE_NAME = 'macubuntu-accents';
+const ENGINE_NAME = 'macubuntu-accents-v2';
 const XKB_PASSTHROUGH = 'xkb:us::eng';
 
 class MacUbuntuAccentBridge {
