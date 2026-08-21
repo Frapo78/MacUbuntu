@@ -41,3 +41,29 @@ jobs:
           python3 -m json.tool /tmp/macubuntu-doctor.json >/dev/null
           ./macubuntu --json plan > /tmp/macubuntu-plan.json
           python3 -m json.tool /tmp/macubuntu-plan.json >/dev/null
+
+      - name: Install package build validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debhelper desktop-file-utils appstream
+
+      - name: Validate desktop metadata
+        run: |
+          desktop-file-validate packaging/io.github.Frapo78.MacUbuntu.desktop
+          appstreamcli validate --no-net packaging/io.github.Frapo78.MacUbuntu.metainfo.xml
+
+      - name: Build Debian package
+        run: dpkg-buildpackage -us -uc -b
+
+      - name: Package smoke tests
+        run: |
+          package=../macubuntu_0.6.0-1_all.deb
+          test -f "$package"
+          dpkg-deb --info "$package"
+          dpkg-deb --contents "$package" | tee /tmp/macubuntu-package-files.txt
+          grep -q './usr/bin/macubuntu$' /tmp/macubuntu-package-files.txt
+          grep -q './usr/bin/macubuntu-gui$' /tmp/macubuntu-package-files.txt
+          grep -q './usr/share/applications/io.github.Frapo78.MacUbuntu.desktop$' /tmp/macubuntu-package-files.txt
+          grep -q './usr/share/metainfo/io.github.Frapo78.MacUbuntu.metainfo.xml$' /tmp/macubuntu-package-files.txt
+          grep -q './usr/share/icons/hicolor/scalable/apps/io.github.Frapo78.MacUbuntu.svg$' /tmp/macubuntu-package-files.txt
+          grep -q './usr/share/doc/macubuntu/CREDITS.md' /tmp/macubuntu-package-files.txt
