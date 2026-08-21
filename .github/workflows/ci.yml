@@ -45,7 +45,7 @@ jobs:
       - name: Install package build validators
         run: |
           sudo apt-get update
-          sudo apt-get install -y debhelper desktop-file-utils appstream
+          sudo apt-get install -y build-essential debhelper desktop-file-utils appstream
 
       - name: Validate desktop metadata
         run: |
