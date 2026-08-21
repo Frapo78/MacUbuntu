@@ -57,7 +57,7 @@ jobs:
 
       - name: Package smoke tests
         run: |
-          package=../macubuntu_0.6.0-1_all.deb
+          package=../macubuntu_0.6.0_all.deb
           test -f "$package"
           dpkg-deb --info "$package"
           dpkg-deb --contents "$package" | tee /tmp/macubuntu-package-files.txt
