@@ -15,9 +15,9 @@ import os
 import signal
 from pathlib import Path
 
-ENGINE_NAME = "macubuntu-accents"
-ENGINE_PATH = "/org/freedesktop/IBus/MacUbuntuAccents/Engine"
-SERVICE_NAME = "org.freedesktop.IBus.MacUbuntuAccents"
+ENGINE_NAME = "macubuntu-accents-v2"
+ENGINE_PATH = "/org/freedesktop/IBus/MacUbuntuAccentsV2/Engine"
+SERVICE_NAME = "org.freedesktop.IBus.MacUbuntuAccentsV2"
 HOLD_DELAY_MS = max(180, int(os.environ.get("MACUBUNTU_ACCENT_HOLD_MS", "420")))
 
 ACCENTS = {
@@ -120,7 +120,6 @@ def run_engine(*, standalone: bool, component_path: str | None) -> int:
 
             if self._pending is not None:
                 if self._same_key(keyval, keycode):
-                    # Swallow auto-repeat for the held accent-capable letter.
                     return True
                 self._commit_base_and_clear()
 
@@ -132,8 +131,6 @@ def run_engine(*, standalone: bool, component_path: str | None) -> int:
             if not variants:
                 return False
 
-            # Delay only letters that actually have accent candidates. A tap is
-            # committed on key release; a hold opens the candidate strip.
             self._pending = {
                 "character": character,
                 "variants": variants,
@@ -148,7 +145,6 @@ def run_engine(*, standalone: bool, component_path: str | None) -> int:
                 self._select(index)
 
         def do_focus_out(self):
-            # A delayed key must never leak into a newly focused application.
             self._clear_pending()
 
         def do_reset(self):
@@ -158,7 +154,6 @@ def run_engine(*, standalone: bool, component_path: str | None) -> int:
             if self._pending is None or not self._same_key(keyval, keycode):
                 return False
             if self._lookup_visible:
-                # macOS keeps the chooser open after releasing the held letter.
                 return True
             self._commit_base_and_clear()
             return True
@@ -273,7 +268,6 @@ def run_engine(*, standalone: bool, component_path: str | None) -> int:
         if component is None or not bus.register_component(component):
             return 5
     else:
-        # IBus itself launched us from a component descriptor.
         bus.request_name(SERVICE_NAME, 0)
 
     loop = GLib.MainLoop()
@@ -288,8 +282,6 @@ def run_engine(*, standalone: bool, component_path: str | None) -> int:
         loop.run()
     finally:
         factory.destroy()
-        # Keep a reference until shutdown: the live registration belongs to
-        # this component process/connection.
         component = None
     return 0
 
