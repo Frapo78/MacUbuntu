@@ -2,3 +2,7 @@
 
 %:
 	dh $@
+
+override_dh_auto_clean:
+	find macubuntu_app -type d -name __pycache__ -prune -exec rm -rf {} +
+	find macubuntu_app -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
