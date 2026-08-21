@@ -3,7 +3,13 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from macubuntu_app.modules.keyboard_accents_support import (
+    LEGACY_SOURCE,
+    migrate_legacy_input_source,
+    parse_sources,
+)
 from macubuntu_app.modules.keyboard_press_hold import PressHoldAccentsModule
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +22,14 @@ def load_engine_module():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+class FakeStore:
+    def __init__(self):
+        self.saves = 0
+
+    def save(self, _state, _version):
+        self.saves += 1
 
 
 class AccentEngineTests(unittest.TestCase):
@@ -37,34 +51,64 @@ class AccentEngineTests(unittest.TestCase):
         self.assertEqual(cp.returncode, 0, cp.stderr)
         self.assertIn("macubuntu-accent-engine: ok", cp.stdout)
 
-    def test_original_input_sources_are_never_removed(self):
-        original = [("xkb", "it"), ("xkb", "us")]
-        original_mru = [("xkb", "it")]
-        sources, mru = PressHoldAccentsModule._merge_source_lists(original, original_mru)
-        for source in original:
-            self.assertIn(source, sources)
-            self.assertIn(source, mru)
-        self.assertEqual(sources[-1], PressHoldAccentsModule.INPUT_SOURCE)
-        self.assertEqual(mru[0], PressHoldAccentsModule.INPUT_SOURCE)
+    def test_standalone_engine_registers_live_component(self):
+        source = ENGINE.read_text(encoding="utf-8")
+        self.assertIn("bus.register_component(component)", source)
+        self.assertIn("bus.request_name(SERVICE_NAME, 0)", source)
+        self.assertIn("--standalone", source)
 
-    def test_source_merge_is_idempotent(self):
-        source = PressHoldAccentsModule.INPUT_SOURCE
-        sources, mru = PressHoldAccentsModule._merge_source_lists(
-            [("xkb", "it"), source],
-            [source, ("xkb", "it")],
-        )
-        self.assertEqual(sources.count(source), 1)
-        self.assertEqual(mru.count(source), 1)
-
-    def test_component_and_autostart_point_to_macubuntu_engine(self):
+    def test_v061_does_not_advertise_an_english_keyboard(self):
         module = PressHoldAccentsModule()
         xml = module._component_xml()
-        desktop = module._autostart()
-        self.assertIn("macubuntu-accents", xml)
-        self.assertIn("Frapo78/MacUbuntu", xml)
-        self.assertIn(str(module.engine_file), xml)
-        self.assertIn(str(module.activation_file), desktop)
-        self.assertIn("X-GNOME-Autostart-enabled=true", desktop)
+        self.assertNotIn("<language>en</language>", xml)
+        self.assertIn("<language>other</language>", xml)
+        self.assertIn("<layout>default</layout>", xml)
+        self.assertIn("--standalone --component", module._activation_script())
+        self.assertNotIn("IBUS_COMPONENT_PATH", module._activation_script())
+
+    def test_gvariant_source_prefix_is_supported(self):
+        self.assertEqual(parse_sources("@a(ss) [('xkb', 'it')]") , [("xkb", "it")])
+
+    def test_legacy_visible_source_is_removed_without_losing_other_keyboards(self):
+        values = {
+            "sources": "[('xkb', 'it'), ('ibus', 'macubuntu-accents'), ('xkb', 'us')]",
+            "mru-sources": "[('ibus', 'macubuntu-accents'), ('xkb', 'it')]",
+        }
+        writes = {}
+        state = {"operations": [
+            {"kind": "gsettings", "schema": "org.gnome.desktop.input-sources", "key": "sources"},
+            {"kind": "gsettings", "schema": "org.gnome.desktop.input-sources", "key": "mru-sources"},
+            {"kind": "other"},
+        ]}
+
+        def fake_get(_runner, _schema, key):
+            return values[key]
+
+        def fake_set(_runner, _schema, key, value):
+            writes[key] = value
+            values[key] = value
+
+        with patch("macubuntu_app.modules.keyboard_accents_support.gsettings_get", side_effect=fake_get), \
+             patch("macubuntu_app.modules.keyboard_accents_support.gsettings_set", side_effect=fake_set):
+            results = migrate_legacy_input_source(
+                runner=object(), store=FakeStore(), state=state,
+                app_version="0.6.1", dry_run=False,
+            )
+
+        self.assertEqual(writes["sources"], "[('xkb', 'it'), ('xkb', 'us')]")
+        self.assertEqual(writes["mru-sources"], "[('xkb', 'it')]")
+        self.assertEqual(state["operations"], [{"kind": "other"}])
+        self.assertTrue(all(result["status"] == "legacy_source_removed" for result in results))
+        self.assertNotIn(LEGACY_SOURCE, parse_sources(writes["sources"]))
+
+    def test_bridge_is_xkb_only_and_respects_password_guard(self):
+        for major in ("42", "46"):
+            path = ROOT / "macubuntu_app" / "assets" / f"accent_bridge_gnome{major}.js"
+            source = path.read_text(encoding="utf-8")
+            self.assertIn("_disableIBus", source)
+            self.assertIn("global-engine-changed", source)
+            self.assertIn("macubuntu-accents", source)
+            self.assertIn("xkb", source)
 
 
 if __name__ == "__main__":
