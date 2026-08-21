@@ -1,0 +1,7 @@
+macubuntu (0.6.0-1) unstable; urgency=medium
+
+  * Add native Debian package foundation for Ubuntu 22.04 and 24.04.
+  * Install CLI, GTK4/libadwaita GUI, launcher, AppStream metadata and icon.
+  * Ship project credits and component documentation with the package.
+
+ -- MacUbuntu Project <Frapo78@users.noreply.github.com>  Fri, 21 Aug 2026 03:30:00 +0200
