@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">MacUbuntu</title>
+  <desc id="desc">MacUbuntu original application icon</desc>
+  <rect x="24" y="24" width="208" height="208" rx="48" fill="#241f31"/>
+  <circle cx="128" cy="128" r="72" fill="#ffffff" opacity="0.96"/>
+  <path d="M80 164V92h22l26 42 26-42h22v72h-20v-40l-22 34h-12l-22-34v40z" fill="#241f31"/>
+  <circle cx="190" cy="66" r="16" fill="#e95420"/>
+</svg>
