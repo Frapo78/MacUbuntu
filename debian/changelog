@@ -1,4 +1,4 @@
-macubuntu (0.6.0-1) unstable; urgency=medium
+macubuntu (0.6.0) unstable; urgency=medium
 
   * Add native Debian package foundation for Ubuntu 22.04 and 24.04.
   * Install CLI, GTK4/libadwaita GUI, launcher, AppStream metadata and icon.
