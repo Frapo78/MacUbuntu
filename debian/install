@@ -1,0 +1,9 @@
+macubuntu usr/lib/macubuntu/
+macubuntu-gui usr/lib/macubuntu/
+macubuntu_app usr/lib/macubuntu/
+packaging/io.github.Frapo78.MacUbuntu.desktop usr/share/applications/
+packaging/io.github.Frapo78.MacUbuntu.metainfo.xml usr/share/metainfo/
+packaging/io.github.Frapo78.MacUbuntu.svg usr/share/icons/hicolor/scalable/apps/
+docs/CREDITS.md usr/share/doc/macubuntu/
+docs/COMPONENTS.md usr/share/doc/macubuntu/
+docs/ARCHITECTURE.md usr/share/doc/macubuntu/
