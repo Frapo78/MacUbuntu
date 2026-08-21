@@ -1,0 +1,36 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: MacUbuntu
+Source: https://github.com/Frapo78/MacUbuntu
+
+Files: *
+Copyright: 2026 Francesco Poltero and MacUbuntu contributors
+License: MIT
+
+Files: packaging/io.github.Frapo78.MacUbuntu.metainfo.xml
+Copyright: 2026 Francesco Poltero and MacUbuntu contributors
+License: CC0-1.0
+
+Files: packaging/io.github.Frapo78.MacUbuntu.svg
+Copyright: 2026 MacUbuntu Project
+License: MIT
+
+License: MIT
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the conditions in the upstream LICENSE file.
+ .
+ The complete MIT text is installed as /usr/share/doc/macubuntu/copyright by
+ this package and is also available in the upstream LICENSE file.
+
+License: CC0-1.0
+ The AppStream metadata is dedicated to the public domain under CC0 1.0.
+
+Comment:
+ Idea and implementation / Idea e realizzazione: Francesco Poltero.
+ Third-party components installed or managed by MacUbuntu are not relicensed by
+ this package. Their upstream projects, pinned sources and licenses are listed
+ in /usr/share/doc/macubuntu/CREDITS.md and COMPONENTS.md. MacUbuntu does not
+ redistribute proprietary Apple operating-system files or fonts.
