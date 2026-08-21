@@ -1,3 +1,12 @@
+macubuntu (0.6.2) unstable; urgency=medium
+
+  * Deepen macOS-style title bars with explicit MacTahoe traffic-light controls.
+  * Apply the configured title-bar font instead of GNOME's system-font default.
+  * Add a non-destructive, receipt-owned GTK4/libadwaita MacTahoe CSS bridge.
+  * Preserve pre-existing user GTK4 CSS instead of overwriting it.
+
+ -- MacUbuntu Project <Frapo78@users.noreply.github.com>  Fri, 21 Aug 2026 15:29:00 +0200
+
 macubuntu (0.6.0) unstable; urgency=medium
 
   * Add native Debian package foundation for Ubuntu 22.04 and 24.04.
