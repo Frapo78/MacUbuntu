@@ -1,0 +1,18 @@
+Source: macubuntu
+Section: utils
+Priority: optional
+Maintainer: MacUbuntu Project <Frapo78@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Homepage: https://github.com/Frapo78/MacUbuntu
+
+Package: macubuntu
+Architecture: all
+Depends: python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, ${misc:Depends}
+Recommends: git
+Description: reversible mac-style transformation manager for Ubuntu GNOME
+ MacUbuntu audits, plans, applies, updates and safely removes a deep mac-style
+ Ubuntu GNOME configuration using one shared CLI/JSON transaction engine.
+ The package includes the GTK4/libadwaita graphical application and desktop
+ integration while preserving ownership tracking and drift-safe uninstall.
