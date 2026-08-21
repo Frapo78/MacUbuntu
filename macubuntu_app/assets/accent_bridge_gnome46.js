@@ -6,7 +6,7 @@ import {
     INPUT_SOURCE_TYPE_XKB,
 } from 'resource:///org/gnome/shell/ui/status/keyboard.js';
 
-const ENGINE_NAME = 'macubuntu-accents';
+const ENGINE_NAME = 'macubuntu-accents-v2';
 const XKB_PASSTHROUGH = 'xkb:us::eng';
 
 /**
@@ -33,8 +33,6 @@ export default class MacUbuntuAccentBridge extends Extension {
                     this._scheduleSync(80);
             }) ?? 0;
 
-        // The user-session engine is started by autostart. Retry a few times
-        // so Shell startup order cannot decide whether the feature works.
         this._scheduleSync(700);
         this._scheduleSync(1800);
         this._scheduleSync(3500);
@@ -52,8 +50,6 @@ export default class MacUbuntuAccentBridge extends Extension {
             GLib.source_remove(id);
         this._timeouts?.clear();
 
-        // Restore GNOME's normal passthrough only for an XKB source. Never
-        // override a real IBus IME during extension disable/update.
         const source = this._sourceManager?.currentSource;
         if (source?.type === INPUT_SOURCE_TYPE_XKB && !this._sourceManager?._disableIBus)
             this._ibusManager?.setEngine(XKB_PASSTHROUGH);
@@ -76,8 +72,6 @@ export default class MacUbuntuAccentBridge extends Extension {
     _syncEngine() {
         if (!this._sourceManager || !this._ibusManager)
             return;
-        // GNOME deliberately disables IBus for password purposes when it has a
-        // non-IBus fallback. Respect that security boundary.
         if (this._sourceManager._disableIBus)
             return;
         const source = this._sourceManager.currentSource;
