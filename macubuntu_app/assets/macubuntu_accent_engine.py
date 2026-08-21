@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-"""MacUbuntu press-and-hold accent input engine.
+"""MacUbuntu transparent press-and-hold accent input engine.
 
-This file is part of MacUbuntu and is released under MacUbuntu's MIT license.
-It intentionally uses IBus rather than global key injection so text insertion
-works through the desktop input-method stack on both X11 and Wayland.
+The engine is an IBus filter: GNOME keeps the user's real XKB input source
+(e.g. Italian) while this engine replaces IBus's xkb passthrough underneath.
+It can be launched by IBus (``--ibus``) or as a user-session component
+(``--standalone``), where it registers itself with the live IBus bus.
 """
 
 from __future__ import annotations
 
 import argparse
+import fcntl
 import os
 import signal
+from pathlib import Path
 
 ENGINE_NAME = "macubuntu-accents"
 ENGINE_PATH = "/org/freedesktop/IBus/MacUbuntuAccents/Engine"
+SERVICE_NAME = "org.freedesktop.IBus.MacUbuntuAccents"
 HOLD_DELAY_MS = max(180, int(os.environ.get("MACUBUNTU_ACCENT_HOLD_MS", "420")))
 
 ACCENTS = {
@@ -28,6 +32,8 @@ ACCENTS = {
     "y": ("ý", "ÿ"),
     "z": ("ž", "ź", "ż"),
 }
+
+_INSTANCE_LOCK = None
 
 
 def variants_for(character: str) -> tuple[str, ...]:
@@ -46,8 +52,27 @@ def _load_ibus():
     return GLib, IBus
 
 
-def run_engine() -> int:
+def _acquire_standalone_lock() -> bool:
+    """Allow one persistent standalone engine per user session."""
+    global _INSTANCE_LOCK
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
+    lock_path = runtime / f"macubuntu-accents-{os.getuid()}.lock"
+    try:
+        handle = lock_path.open("a+", encoding="utf-8")
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, BlockingIOError):
+        return False
+    _INSTANCE_LOCK = handle
+    return True
+
+
+def run_engine(*, standalone: bool, component_path: str | None) -> int:
     GLib, IBus = _load_ibus()
+    IBus.init()
+    bus = IBus.Bus()
+    if not bus.is_connected():
+        return 2
+
     release_mask = IBus.ModifierType.RELEASE_MASK
     blocking_mask = (
         IBus.ModifierType.CONTROL_MASK
@@ -95,6 +120,7 @@ def run_engine() -> int:
 
             if self._pending is not None:
                 if self._same_key(keyval, keycode):
+                    # Swallow auto-repeat for the held accent-capable letter.
                     return True
                 self._commit_base_and_clear()
 
@@ -106,6 +132,8 @@ def run_engine() -> int:
             if not variants:
                 return False
 
+            # Delay only letters that actually have accent candidates. A tap is
+            # committed on key release; a hold opens the candidate strip.
             self._pending = {
                 "character": character,
                 "variants": variants,
@@ -120,7 +148,7 @@ def run_engine() -> int:
                 self._select(index)
 
         def do_focus_out(self):
-            # Never risk committing a delayed key into a newly focused app.
+            # A delayed key must never leak into a newly focused application.
             self._clear_pending()
 
         def do_reset(self):
@@ -130,6 +158,7 @@ def run_engine() -> int:
             if self._pending is None or not self._same_key(keyval, keycode):
                 return False
             if self._lookup_visible:
+                # macOS keeps the chooser open after releasing the held letter.
                 return True
             self._commit_base_and_clear()
             return True
@@ -138,8 +167,6 @@ def run_engine() -> int:
             if self._pending is None:
                 return False
             pending_code = self._pending["keycode"]
-            # Physical keycode remains stable even if Shift is released before
-            # the letter, which can otherwise change the release keyval.
             if pending_code and keycode:
                 return pending_code == keycode
             return self._pending["keyval"] == keyval
@@ -220,8 +247,8 @@ def run_engine() -> int:
             self._pending = None
 
     class AccentFactory(IBus.Factory):
-        def __init__(self, bus):
-            self._connection = bus.get_connection()
+        def __init__(self, ibus_bus):
+            self._connection = ibus_bus.get_connection()
             self._counter = 0
             super().__init__(connection=self._connection, object_path=IBus.PATH_FACTORY)
 
@@ -231,26 +258,49 @@ def run_engine() -> int:
             self._counter += 1
             return AccentEngine(self._connection, f"{ENGINE_PATH}/{self._counter}")
 
-    IBus.init()
-    loop = GLib.MainLoop()
-    bus = IBus.Bus()
+    if standalone and not _acquire_standalone_lock():
+        return 0
+
     factory = AccentFactory(bus)
-    bus.request_name("org.freedesktop.IBus.MacUbuntuAccents", 0)
+    component = None
+    if standalone:
+        if not component_path:
+            return 3
+        component_file = Path(component_path).expanduser()
+        if not component_file.is_file():
+            return 4
+        component = IBus.Component.new_from_file(str(component_file))
+        if component is None or not bus.register_component(component):
+            return 5
+    else:
+        # IBus itself launched us from a component descriptor.
+        bus.request_name(SERVICE_NAME, 0)
+
+    loop = GLib.MainLoop()
+    bus.connect("disconnected", lambda *_args: loop.quit())
 
     def stop(*_args):
         loop.quit()
 
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
-    loop.run()
-    factory.destroy()
+    try:
+        loop.run()
+    finally:
+        factory.destroy()
+        # Keep a reference until shutdown: the live registration belongs to
+        # this component process/connection.
+        component = None
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="MacUbuntu press-and-hold accent engine")
-    parser.add_argument("--ibus", action="store_true", help="run as an IBus engine")
-    parser.add_argument("--self-test", action="store_true", help="test accent tables without IBus")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--ibus", action="store_true", help="run when launched by IBus")
+    modes.add_argument("--standalone", action="store_true", help="register with the live IBus bus and stay resident")
+    parser.add_argument("--component", help="component XML path for --standalone")
+    parser.add_argument("--self-test", action="store_true", help="test accent tables without loading IBus")
     args = parser.parse_args()
 
     if args.self_test:
@@ -259,8 +309,12 @@ def main() -> int:
         assert variants_for("q") == ()
         print("macubuntu-accent-engine: ok")
         return 0
+    if args.standalone:
+        if not args.component:
+            parser.error("--standalone requires --component")
+        return run_engine(standalone=True, component_path=args.component)
     if args.ibus:
-        return run_engine()
+        return run_engine(standalone=False, component_path=None)
     parser.print_help()
     return 0
 
