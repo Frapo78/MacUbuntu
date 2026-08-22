@@ -17,16 +17,17 @@ class CP:
 
 
 class FakeGitRunner:
-    def __init__(self, *, remote="https://github.com/Frapo78/MacUbuntu.git", dirty=False, local="aaa", latest="bbb", package_version="0.6.2"):
+    def __init__(self, *, remote="https://github.com/Frapo78/MacUbuntu.git", dirty=False, local="aaa", latest="bbb", package_version="0.6.2", dpkg_available=True):
         self.remote = remote
         self.dirty = dirty
         self.local = local
         self.latest = latest
         self.package_version = package_version
+        self.dpkg_available = dpkg_available
         self.commands = []
 
     def exists(self, command):
-        return command in {"git", "dpkg-query"}
+        return command == "git" or (command == "dpkg-query" and self.dpkg_available)
 
     def run(self, args, check=True, capture=True, env=None):
         self.commands.append(list(args))
@@ -117,6 +118,14 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual(result["status"], "not_git_checkout")
         self.assertEqual(result["installation"]["kind"], "deb_package")
         self.assertEqual(result["update_method"], "package_manager")
+        self.assertFalse(any(command and command[0] == "git" for command in runner.commands))
+
+    def test_debian_path_is_protected_without_dpkg_query(self):
+        runner = FakeGitRunner(dpkg_available=False)
+        result = update_checkout(runner, Path("/usr/lib/macubuntu"))
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["installation"]["kind"], "deb_package")
+        self.assertIsNone(result["installation"]["installed"])
         self.assertFalse(any(command and command[0] == "git" for command in runner.commands))
 
 
