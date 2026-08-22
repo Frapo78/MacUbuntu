@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 from macubuntu_app.updater import (
+    detect_installation_source,
     is_official_remote,
     normalize_github_remote,
     update_checkout,
@@ -16,18 +17,22 @@ class CP:
 
 
 class FakeGitRunner:
-    def __init__(self, *, remote="https://github.com/Frapo78/MacUbuntu.git", dirty=False, local="aaa", latest="bbb"):
+    def __init__(self, *, remote="https://github.com/Frapo78/MacUbuntu.git", dirty=False, local="aaa", latest="bbb", package_version="0.6.2", dpkg_available=True):
         self.remote = remote
         self.dirty = dirty
         self.local = local
         self.latest = latest
+        self.package_version = package_version
+        self.dpkg_available = dpkg_available
         self.commands = []
 
     def exists(self, command):
-        return command == "git"
+        return command == "git" or (command == "dpkg-query" and self.dpkg_available)
 
     def run(self, args, check=True, capture=True, env=None):
         self.commands.append(list(args))
+        if args and args[0] == "dpkg-query":
+            return CP(stdout="ii \t" + self.package_version)
         cmd = list(args[3:])  # git -C ROOT ...
         if cmd == ["rev-parse", "--is-inside-work-tree"]:
             return CP(stdout="true\n")
@@ -90,6 +95,7 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual(result["current_commit"], "bbb")
         self.assertTrue(result["restart_required"])
         self.assertIn("README.md", result["changed_files"])
+        self.assertEqual(result["installation"]["kind"], "checkout")
 
     def test_up_to_date_is_noop(self):
         runner = FakeGitRunner(local="aaa", latest="aaa")
@@ -97,6 +103,30 @@ class UpdaterTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["status"], "up_to_date")
         self.assertFalse(result["updated"])
+
+    def test_debian_install_is_classified_with_package_version(self):
+        runner = FakeGitRunner(package_version="0.6.2")
+        source = detect_installation_source(runner, Path("/usr/lib/macubuntu"))
+        self.assertEqual(source["kind"], "deb_package")
+        self.assertTrue(source["installed"])
+        self.assertEqual(source["package_version"], "0.6.2")
+
+    def test_debian_install_never_invokes_git(self):
+        runner = FakeGitRunner()
+        result = update_checkout(runner, Path("/usr/lib/macubuntu"))
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "not_git_checkout")
+        self.assertEqual(result["installation"]["kind"], "deb_package")
+        self.assertEqual(result["update_method"], "package_manager")
+        self.assertFalse(any(command and command[0] == "git" for command in runner.commands))
+
+    def test_debian_path_is_protected_without_dpkg_query(self):
+        runner = FakeGitRunner(dpkg_available=False)
+        result = update_checkout(runner, Path("/usr/lib/macubuntu"))
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["installation"]["kind"], "deb_package")
+        self.assertIsNone(result["installation"]["installed"])
+        self.assertFalse(any(command and command[0] == "git" for command in runner.commands))
 
 
 if __name__ == "__main__":
