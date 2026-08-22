@@ -7,6 +7,8 @@ from .util import Runner
 
 OFFICIAL_REPOSITORY = "Frapo78/MacUbuntu"
 OFFICIAL_BRANCH = "main"
+DEBIAN_PACKAGE = "macubuntu"
+DEBIAN_INSTALL_ROOT = Path("/usr/lib/macubuntu")
 
 
 def normalize_github_remote(url: str) -> str | None:
@@ -49,6 +51,51 @@ def _failure(status: str, **extra: Any) -> dict[str, Any]:
     return {"ok": False, "status": status, **extra}
 
 
+def _is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def detect_installation_source(runner: Runner, root: Path) -> dict[str, Any]:
+    """Classify the running copy before any updater mutation is attempted.
+
+    Debian package payloads are owned by dpkg and must never be modified by the
+    Git self-updater, even if the package database is temporarily unavailable.
+    """
+    resolved = root.resolve()
+    if not _is_within(resolved, DEBIAN_INSTALL_ROOT):
+        return {"kind": "checkout", "root": str(resolved)}
+
+    source: dict[str, Any] = {
+        "kind": "deb_package",
+        "package": DEBIAN_PACKAGE,
+        "root": str(resolved),
+        "installed": None,
+    }
+    if not runner.exists("dpkg-query"):
+        return source
+
+    cp = runner.run(
+        ["dpkg-query", "-W", "-f=${db:Status-Abbrev}\t${Version}", DEBIAN_PACKAGE],
+        check=False,
+        capture=True,
+    )
+    if cp.returncode != 0:
+        return source
+
+    fields = (cp.stdout or "").strip().split("\t", 1)
+    if not fields or not fields[0].startswith("ii"):
+        return source
+
+    source["installed"] = True
+    if len(fields) == 2 and fields[1]:
+        source["package_version"] = fields[1]
+    return source
+
+
 def update_checkout(
     runner: Runner,
     root: Path,
@@ -58,9 +105,22 @@ def update_checkout(
     """Check or fast-forward a clean checkout of the official repository.
 
     The updater deliberately refuses to alter dirty trees, forks, detached HEADs,
-    development branches, locally-ahead branches or diverged histories.
+    development branches, locally-ahead branches or diverged histories. Debian
+    package installs are also refused before Git is invoked because dpkg owns
+    their payload; those copies must be updated through the package channel.
     """
     root = root.resolve()
+    installation = detect_installation_source(runner, root)
+    if installation["kind"] == "deb_package":
+        return _failure(
+            "not_git_checkout",
+            repository=OFFICIAL_REPOSITORY,
+            root=str(root),
+            check_only=check_only,
+            updated=False,
+            installation=installation,
+            update_method="package_manager",
+        )
 
     if not runner.exists("git"):
         return _failure("git_missing", repository=OFFICIAL_REPOSITORY)
@@ -141,6 +201,7 @@ def update_checkout(
         "current_commit": before,
         "latest_commit": latest,
         "check_only": check_only,
+        "installation": installation,
     }
 
     if before == latest:
