@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from .util import atomic_json_write, xdg_state_home
 
@@ -61,7 +62,36 @@ def default_state() -> dict[str, Any]:
         "updated_at": None,
         "profile": default_profile(),
         "operations": [],
+        "transaction": None,
+        "last_transaction": None,
     }
+
+
+def _validate_transaction(record: Any, *, path: Path, active: bool) -> dict[str, Any] | None:
+    if record is None:
+        return None
+    if not isinstance(record, dict):
+        raise StateValidationError("transaction metadata must be an object or null", path=path)
+
+    required_strings = ("id", "operation", "status", "started_at", "app_version")
+    if any(not isinstance(record.get(key), str) or not record.get(key) for key in required_strings):
+        raise StateValidationError("transaction metadata is incomplete", path=path)
+
+    expected_status = "in_progress" if active else "committed"
+    if record.get("status") != expected_status:
+        raise StateValidationError(f"transaction status must be {expected_status}", path=path)
+
+    baseline = record.get("baseline_operation_count")
+    if not isinstance(baseline, int) or baseline < 0:
+        raise StateValidationError("transaction baseline operation count is invalid", path=path)
+
+    if not active:
+        if not isinstance(record.get("completed_at"), str) or not record.get("completed_at"):
+            raise StateValidationError("committed transaction is missing completed_at", path=path)
+        final_count = record.get("final_operation_count")
+        if not isinstance(final_count, int) or final_count < 0:
+            raise StateValidationError("committed transaction final operation count is invalid", path=path)
+    return deepcopy(record)
 
 
 def _validate_state(data: Any, *, path: Path) -> dict[str, Any]:
@@ -85,6 +115,8 @@ def _validate_state(data: Any, *, path: Path) -> dict[str, Any]:
     normalized_profile = normalized.setdefault("profile", profile)
     for key, value in default_profile().items():
         normalized_profile.setdefault(key, value)
+    normalized["transaction"] = _validate_transaction(data.get("transaction"), path=path, active=True)
+    normalized["last_transaction"] = _validate_transaction(data.get("last_transaction"), path=path, active=False)
     return normalized
 
 
@@ -134,6 +166,18 @@ class StateStore:
                 "backup_valid": backup_ok,
                 **result,
             }
+
+        transaction = state.get("transaction")
+        if transaction:
+            return {
+                "ok": False,
+                "status": "transaction_interrupted",
+                "transaction": transaction,
+                "operation_count": len(state.get("operations", [])),
+                "profile_applied": bool(state.get("profile", {}).get("applied")),
+                **result,
+            }
+
         return {
             "ok": True,
             "status": "ok",
@@ -154,20 +198,52 @@ class StateStore:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             if self.path.exists():
-                # Never overwrite an unreadable state file. A broken receipt is safer
-                # than silently replacing ownership history with incomplete data.
                 self._read_path(self.path)
                 shutil.copy2(self.path, self.backup_path)
             atomic_json_write(self.path, out)
+            state.clear()
+            state.update(deepcopy(out))
         except StateError:
             raise
         except OSError as exc:
             raise StateWriteError(str(exc), path=self.path) from exc
 
+    def begin_transaction(self, state: dict[str, Any], app_version: str, operation: str) -> dict[str, Any]:
+        if state.get("transaction"):
+            raise StateValidationError("a transaction is already in progress", path=self.path)
+        transaction = {
+            "id": str(uuid4()),
+            "operation": operation,
+            "status": "in_progress",
+            "started_at": now_iso(),
+            "app_version": app_version,
+            "baseline_operation_count": len(state.get("operations", [])),
+        }
+        state["transaction"] = transaction
+        self.save(state, app_version)
+        return deepcopy(transaction)
+
+    def commit_transaction(self, state: dict[str, Any], app_version: str) -> dict[str, Any]:
+        transaction = state.get("transaction")
+        if not transaction:
+            raise StateValidationError("no transaction is in progress", path=self.path)
+        committed = {
+            **transaction,
+            "status": "committed",
+            "completed_at": now_iso(),
+            "final_operation_count": len(state.get("operations", [])),
+        }
+        state["transaction"] = None
+        state["last_transaction"] = committed
+        self.save(state, app_version)
+        return deepcopy(committed)
+
     def remove_if_empty(self, state: dict[str, Any]) -> None:
         if state.get("operations"):
             return
         if state.get("profile", {}).get("applied"):
+            return
+        if state.get("transaction"):
             return
         for path in (self.path, self.backup_path):
             try:
