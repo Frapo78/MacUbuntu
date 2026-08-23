@@ -1,3 +1,0 @@
-# GitHub Actions CI intentionally disabled.
-# MacUbuntu tests must be run locally before every push.
-# This file contains no triggers and no jobs.
