@@ -102,7 +102,13 @@ def run_doctor(runner: Runner, store: StateStore, root: Path) -> dict[str, Any]:
 
     state_health = store.health()
     state_data = {key: value for key, value in state_health.items() if key not in {"ok", "status"}}
-    if state_health["ok"]:
+    recovery_required = state_health.get("status") == "transaction_interrupted"
+    if recovery_required:
+        # Keep the human-facing doctor message on an existing localized key while
+        # exposing the precise recovery reason as structured JSON data.
+        state_data["recovery_status"] = "transaction_interrupted"
+        checks.append(_check("state", FAIL, "state_invalid", **state_data))
+    elif state_health["ok"]:
         checks.append(_check("state", PASS, state_health["status"], **state_data))
     else:
         checks.append(_check("state", FAIL, state_health["status"], **state_data))
@@ -133,10 +139,17 @@ def run_doctor(runner: Runner, store: StateStore, root: Path) -> dict[str, Any]:
     else:
         status = "healthy"
 
+    recovery = {
+        "required": recovery_required,
+        "status": "transaction_interrupted" if recovery_required else "none",
+        "transaction": state_health.get("transaction") if recovery_required else None,
+    }
+
     return {
         "ok": counts[FAIL] == 0,
         "status": status,
         "summary": counts,
         "checks": checks,
+        "recovery": recovery,
         "audit": audit,
     }

@@ -48,6 +48,7 @@ class Engine:
         *,
         dry_run: bool = False,
         progress: ProgressCallback | None = None,
+        _transaction_operation: str = "apply",
     ) -> dict[str, Any]:
         audit = self.audit()
         if audit["support"]["level"] == "unsupported":
@@ -59,6 +60,9 @@ class Engine:
             }
 
         state = self.store.load()
+        if not dry_run:
+            self.store.begin_transaction(state, __version__, _transaction_operation)
+
         results: list[dict[str, Any]] = []
         total = len(ALL_MODULES)
         for index, module in enumerate(ALL_MODULES, start=1):
@@ -96,11 +100,8 @@ class Engine:
             profile["applied"] = True
             profile["last_apply_at"] = now_iso()
             profile["version"] = __version__
-            self.store.save(state, __version__)
+            self.store.commit_transaction(state, __version__)
 
-        # The celebratory success event is deliberately emitted only after the
-        # final profile receipt has been persisted.  A failed state write must
-        # never show a misleading 100%/success message.
         if progress:
             progress({
                 "event": "complete",
@@ -129,6 +130,7 @@ class Engine:
             "managed": bool(owned_operations),
             "operation_count": owned_operations,
             "plan_summary": summary,
+            "recovery_required": bool(state.get("transaction")),
             "state": state,
         }
 
@@ -147,6 +149,9 @@ class Engine:
                 "results": [],
                 "message": "nothing_managed",
             }
+
+        if not dry_run:
+            self.store.begin_transaction(state, __version__, "uninstall")
 
         results: list[dict[str, Any]] = []
         if state.get("operations"):
@@ -176,13 +181,15 @@ class Engine:
                 profile = state.setdefault("profile", {})
                 profile["applied"] = False
                 profile["last_uninstall_at"] = now_iso()
-                self.store.save(state, __version__)
-                self.store.remove_if_empty(state)
                 results.append({
                     "kind": "profile",
                     "resource": "default",
                     "status": "cleared",
                 })
+
+        if not dry_run:
+            self.store.commit_transaction(state, __version__)
+            self.store.remove_if_empty(state)
 
         return {
             "ok": True,
@@ -206,7 +213,11 @@ class Engine:
                 "plan": plan,
                 "apply": None,
             }
-        apply_result = self.apply(dry_run=dry_run, progress=progress)
+        apply_result = self.apply(
+            dry_run=dry_run,
+            progress=progress,
+            _transaction_operation="macify",
+        )
         return {
             "ok": bool(apply_result.get("ok")),
             "audit": audit,
