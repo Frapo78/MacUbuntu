@@ -198,11 +198,11 @@ class StateStore:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             if self.path.exists():
+                # Never overwrite an unreadable state file. A broken receipt is safer
+                # than silently replacing ownership history with incomplete data.
                 self._read_path(self.path)
                 shutil.copy2(self.path, self.backup_path)
             atomic_json_write(self.path, out)
-            state.clear()
-            state.update(deepcopy(out))
         except StateError:
             raise
         except OSError as exc:
