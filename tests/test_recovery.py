@@ -15,22 +15,13 @@ class FakeStore:
         self.health_status = health_status
         self.backup_error = backup_error
 
-        class BackupPath:
-            def __init__(self, exists):
-                self._exists = exists
-
-            def exists(self):
-                return self._exists
-
-        self.backup_path = BackupPath(backup is not None or backup_error is not None)
-
     def health(self):
         return {"status": self.health_status}
 
     def load(self):
         return self.state
 
-    def _read_path(self, path):
+    def load_backup(self):
         if self.backup_error:
             raise self.backup_error
         return self.backup
@@ -127,6 +118,17 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotIn("alice", rendered)
         self.assertNotIn("token=secret", rendered)
         self.assertEqual(out["evidence"][0]["reason"], "probe_not_implemented")
+
+    def test_invalid_backup_is_reported_without_mutation(self):
+        out = inspect_recovery(
+            FakeRunner(),
+            FakeStore(
+                {"transaction": transaction(), "operations": []},
+                backup_error=RuntimeError("broken backup"),
+            ),
+        )
+        self.assertEqual(out["backup"]["status"], "invalid")
+        self.assertFalse(out["automatic_mutation"])
 
     def test_no_receipts_still_requires_manual_review(self):
         out = inspect_recovery(
