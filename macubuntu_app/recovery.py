@@ -62,6 +62,7 @@ def inspect_recovery(runner: Runner, store: Any) -> dict[str, Any]:
             "ok": True,
             "required": False,
             "status": "none",
+            "classification": "none",
             "decision": "no_recovery_needed",
             "transaction": None,
             "evidence": [],
@@ -98,14 +99,15 @@ def inspect_recovery(runner: Runner, store: Any) -> dict[str, Any]:
         if isinstance(backup_operations, list):
             backup_operation_count = len(backup_operations)
 
-    status = "inconsistent" if inconsistent else "receipts_consistent"
+    classification = "inconsistent" if inconsistent else "receipts_consistent"
     if not transaction_receipts:
-        status = "no_receipted_mutations"
+        classification = "no_receipted_mutations"
 
     return {
         "ok": False,
         "required": True,
-        "status": status,
+        "status": "transaction_interrupted",
+        "classification": classification,
         "decision": "manual_review",
         "automatic_mutation": False,
         "reason": "unreceipted_mutation_cannot_be_excluded",
