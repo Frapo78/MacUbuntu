@@ -28,6 +28,20 @@ This journal deliberately records no usernames, arbitrary home paths, environmen
 
 The transaction marker is detection evidence, not an automatic rollback instruction. MacUbuntu still does not silently restore `state.json.bak`, purge packages, reset GSettings or overwrite user drift after an interrupted run.
 
+### Read-only recovery evidence
+
+When an interrupted transaction exists, `doctor --json` now adds a read-only recovery inspection report while preserving the stable top-level recovery status `transaction_interrupted`.
+
+The inspector compares the transaction baseline receipt count with the current state and the valid backup when one exists. Receipts created after the transaction baseline are probed against the real machine for the operation kinds that currently have conservative probes:
+
+- GSettings receipts are classified as still applied, restored to the original value, drifted, or unverifiable;
+- APT bundle receipts are classified from the presence of the packages MacUbuntu actually added, including partial installation/removal states;
+- receipt kinds without a dedicated privacy-reviewed probe are reported only by kind and index as `unverifiable`. Arbitrary receipt fields such as local paths or command data are not echoed into the recovery report.
+
+The report exposes a `classification` such as `receipts_consistent`, `inconsistent` or `no_receipted_mutations`, receipt/backup counts and per-receipt evidence. It deliberately sets `automatic_mutation: false` and `decision: manual_review` for every interrupted transaction.
+
+This conservative rule is important: a crash can occur after the machine was changed but before the corresponding receipt was written. A set of consistent receipts can therefore prove useful facts, but cannot yet prove that no unreceipted mutation exists.
+
 ## External component failures
 
 Third-party download/validation/install errors use the same controlled command-failure UX as APT/GSettings failures. In normal mode the user sees a short localized error. `--verbose`/JSON expose the failing resource, synthetic operation code and captured stderr.
@@ -40,4 +54,4 @@ If MacUbuntu added a Flatpak remote and the user later installs other apps from 
 
 ## Remaining recovery boundary
 
-Issue #12 still tracks the next reconciliation layer: inspect actual machine state, current receipts and the valid backup, classify each interrupted resource as applied/partial/not-applied, and offer explicit safe recovery choices. Until that layer lands, an interrupted transaction fails closed and requires deliberate reconciliation rather than reconstruction from guesses.
+Issue #12 still tracks the mutating reconciliation layer: add dedicated probes for every managed external receipt kind, identify any unreceipted mutation candidates, and offer explicit safe recovery choices. Until those proofs exist, an interrupted transaction remains blocked and MacUbuntu will not reconstruct ownership or roll back from guesses.
