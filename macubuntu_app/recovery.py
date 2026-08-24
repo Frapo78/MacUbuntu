@@ -78,8 +78,8 @@ def inspect_recovery(runner: Runner, store: Any) -> dict[str, Any]:
     backup = None
     backup_status = "absent"
     try:
-        if store.backup_path.exists():
-            backup = store._read_path(store.backup_path)
+        backup = store.load_backup()
+        if backup is not None:
             backup_status = "valid"
     except Exception:
         backup_status = "invalid"
