@@ -52,6 +52,7 @@ class RecoveryTests(unittest.TestCase):
         out = inspect_recovery(FakeRunner(), FakeStore({}, health_status="ok"))
         self.assertTrue(out["ok"])
         self.assertFalse(out["required"])
+        self.assertEqual(out["status"], "none")
 
     @patch("macubuntu_app.recovery.gsettings_get", return_value="'b'")
     def test_gsetting_applied_is_consistent_evidence(self, _get):
@@ -66,7 +67,8 @@ class RecoveryTests(unittest.TestCase):
             FakeRunner(),
             FakeStore({"transaction": transaction(), "operations": [op]}, {"operations": []}),
         )
-        self.assertEqual(out["status"], "receipts_consistent")
+        self.assertEqual(out["status"], "transaction_interrupted")
+        self.assertEqual(out["classification"], "receipts_consistent")
         self.assertEqual(out["evidence"][0]["status"], "applied")
         self.assertFalse(out["automatic_mutation"])
 
@@ -83,7 +85,7 @@ class RecoveryTests(unittest.TestCase):
             FakeRunner(),
             FakeStore({"transaction": transaction(), "operations": [op]}),
         )
-        self.assertEqual(out["status"], "inconsistent")
+        self.assertEqual(out["classification"], "inconsistent")
         self.assertEqual(out["evidence"][0]["status"], "drifted")
 
     @patch("macubuntu_app.recovery.package_installed", side_effect=lambda _runner, package: package == "a")
@@ -94,7 +96,7 @@ class RecoveryTests(unittest.TestCase):
             FakeStore({"transaction": transaction(), "operations": [op]}),
         )
         self.assertEqual(out["evidence"][0]["status"], "partial")
-        self.assertEqual(out["status"], "inconsistent")
+        self.assertEqual(out["classification"], "inconsistent")
 
     @patch("macubuntu_app.recovery.gsettings_get", return_value="2")
     def test_only_receipts_after_transaction_baseline_are_inspected(self, get_value):
@@ -131,7 +133,8 @@ class RecoveryTests(unittest.TestCase):
             FakeRunner(),
             FakeStore({"transaction": transaction(), "operations": []}, {"operations": []}),
         )
-        self.assertEqual(out["status"], "no_receipted_mutations")
+        self.assertEqual(out["status"], "transaction_interrupted")
+        self.assertEqual(out["classification"], "no_receipted_mutations")
         self.assertEqual(out["decision"], "manual_review")
 
 
