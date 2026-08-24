@@ -1,12 +1,11 @@
 import unittest
+from unittest.mock import ANY, patch
 
 from macubuntu_app.recovery import inspect_recovery
 
 
 class FakeRunner:
-    def __init__(self, gsettings=None, packages=None):
-        self.gsettings = gsettings or {}
-        self.packages = set(packages or [])
+    pass
 
 
 class FakeStore:
@@ -54,7 +53,8 @@ class RecoveryTests(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertFalse(out["required"])
 
-    def test_gsetting_applied_is_consistent_evidence(self):
+    @patch("macubuntu_app.recovery.gsettings_get", return_value="'b'")
+    def test_gsetting_applied_is_consistent_evidence(self, _get):
         op = {
             "kind": "gsettings",
             "schema": "org.example",
@@ -63,14 +63,15 @@ class RecoveryTests(unittest.TestCase):
             "applied": "'b'",
         }
         out = inspect_recovery(
-            FakeRunner({("org.example", "x"): "'b'"}),
+            FakeRunner(),
             FakeStore({"transaction": transaction(), "operations": [op]}, {"operations": []}),
         )
         self.assertEqual(out["status"], "receipts_consistent")
         self.assertEqual(out["evidence"][0]["status"], "applied")
         self.assertFalse(out["automatic_mutation"])
 
-    def test_gsetting_drift_is_inconsistent(self):
+    @patch("macubuntu_app.recovery.gsettings_get", return_value="'c'")
+    def test_gsetting_drift_is_inconsistent(self, _get):
         op = {
             "kind": "gsettings",
             "schema": "org.example",
@@ -79,26 +80,28 @@ class RecoveryTests(unittest.TestCase):
             "applied": "'b'",
         }
         out = inspect_recovery(
-            FakeRunner({("org.example", "x"): "'c'"}),
+            FakeRunner(),
             FakeStore({"transaction": transaction(), "operations": [op]}),
         )
         self.assertEqual(out["status"], "inconsistent")
         self.assertEqual(out["evidence"][0]["status"], "drifted")
 
-    def test_apt_partial_is_inconsistent(self):
+    @patch("macubuntu_app.recovery.package_installed", side_effect=lambda _runner, package: package == "a")
+    def test_apt_partial_is_inconsistent(self, _installed):
         op = {"kind": "apt_bundle", "requested": ["a", "b"], "added": ["a", "b"]}
         out = inspect_recovery(
-            FakeRunner(packages={"a"}),
+            FakeRunner(),
             FakeStore({"transaction": transaction(), "operations": [op]}),
         )
         self.assertEqual(out["evidence"][0]["status"], "partial")
         self.assertEqual(out["status"], "inconsistent")
 
-    def test_only_receipts_after_transaction_baseline_are_inspected(self):
+    @patch("macubuntu_app.recovery.gsettings_get", return_value="2")
+    def test_only_receipts_after_transaction_baseline_are_inspected(self, get_value):
         old = {"kind": "gsettings", "schema": "old", "key": "k", "original": "1", "applied": "2"}
         new = {"kind": "gsettings", "schema": "new", "key": "k", "original": "1", "applied": "2"}
         out = inspect_recovery(
-            FakeRunner({("new", "k"): "2"}),
+            FakeRunner(),
             FakeStore(
                 {"transaction": transaction(1), "operations": [old, new]},
                 {"operations": [old]},
@@ -106,6 +109,7 @@ class RecoveryTests(unittest.TestCase):
         )
         self.assertEqual(out["counts"]["transaction_receipts"], 1)
         self.assertEqual(out["evidence"][0]["resource"], "new::k")
+        get_value.assert_called_once_with(ANY, "new", "k")
 
     def test_unknown_receipt_does_not_leak_arbitrary_fields(self):
         op = {
