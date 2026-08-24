@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from .recovery import inspect_recovery
 from .state import StateStore
 from .system import audit_system
 from .updater import is_official_remote
@@ -104,8 +105,6 @@ def run_doctor(runner: Runner, store: StateStore, root: Path) -> dict[str, Any]:
     state_data = {key: value for key, value in state_health.items() if key not in {"ok", "status"}}
     recovery_required = state_health.get("status") == "transaction_interrupted"
     if recovery_required:
-        # Keep the human-facing doctor message on an existing localized key while
-        # exposing the precise recovery reason as structured JSON data.
         state_data["recovery_status"] = "transaction_interrupted"
         checks.append(_check("state", FAIL, "state_invalid", **state_data))
     elif state_health["ok"]:
@@ -139,10 +138,13 @@ def run_doctor(runner: Runner, store: StateStore, root: Path) -> dict[str, Any]:
     else:
         status = "healthy"
 
-    recovery = {
-        "required": recovery_required,
-        "status": "transaction_interrupted" if recovery_required else "none",
-        "transaction": state_health.get("transaction") if recovery_required else None,
+    recovery = inspect_recovery(runner, store) if recovery_required else {
+        "ok": True,
+        "required": False,
+        "status": "none",
+        "decision": "no_recovery_needed",
+        "transaction": None,
+        "evidence": [],
     }
 
     return {
