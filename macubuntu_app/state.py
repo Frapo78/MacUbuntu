@@ -141,6 +141,11 @@ class StateStore:
             return default_state()
         return self._read_path(self.path)
 
+    def load_backup(self) -> dict[str, Any] | None:
+        if not self.backup_path.exists():
+            return None
+        return self._read_path(self.backup_path)
+
     def health(self) -> dict[str, Any]:
         result: dict[str, Any] = {
             "path": str(self.path),
