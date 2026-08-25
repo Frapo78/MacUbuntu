@@ -6,11 +6,18 @@ from macubuntu_app.recovery import _probe_receipt, inspect_recovery
 
 
 class FakeRunner:
-    def __init__(self, enabled="enabled", active="active"):
+    def __init__(self, enabled="enabled", active="active", unit_exists=True, flatpak=True):
         self.enabled = enabled
         self.active = active
+        self.unit_exists = unit_exists
+        self.flatpak = flatpak
+
+    def exists(self, command):
+        return self.flatpak if command == "flatpak" else True
 
     def run(self, cmd, check=False):
+        if "cat" in cmd:
+            return SimpleNamespace(stdout="", returncode=0 if self.unit_exists else 1)
         if "is-enabled" in cmd:
             return SimpleNamespace(stdout=self.enabled + "\n", returncode=0)
         if "is-active" in cmd:
@@ -180,6 +187,14 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(out["evidence"][0]["status"], "partial")
         self.assertEqual(out["classification"], "inconsistent")
 
+    @patch("macubuntu_app.recovery._tree_digest", side_effect=PermissionError("denied"))
+    def test_owned_paths_unreadable_is_fail_closed(self, _digest):
+        op = {"kind": "owned_paths", "paths": [{"path": "/root/private", "digest": "abc"}]}
+        out = _probe_receipt(FakeRunner(), op, 0)
+        self.assertEqual(out["status"], "unverifiable")
+        self.assertEqual(out["reason"], "managed_path_unreadable")
+        self.assertNotIn("/root/private", str(out))
+
     @patch("macubuntu_app.recovery.apt_repository_present", return_value=True)
     def test_apt_repository_applied(self, _present):
         out = _probe_receipt(FakeRunner(), {"kind": "apt_repository", "ppa": "ppa:owner/archive"}, 0)
@@ -189,6 +204,15 @@ class RecoveryTests(unittest.TestCase):
     def test_flatpak_remote_absent_is_original(self, _present):
         out = _probe_receipt(FakeRunner(), {"kind": "flatpak_remote", "resource": "flathub"}, 0)
         self.assertEqual(out["status"], "original")
+
+    def test_flatpak_unavailable_is_unverifiable(self):
+        out = _probe_receipt(
+            FakeRunner(flatpak=False),
+            {"kind": "flatpak_app", "resource": "org.example.App"},
+            0,
+        )
+        self.assertEqual(out["status"], "unverifiable")
+        self.assertEqual(out["reason"], "flatpak_unavailable")
 
     @patch("macubuntu_app.recovery._flatpak_app_installed", return_value=True)
     def test_flatpak_app_present_is_applied(self, _present):
@@ -236,6 +260,20 @@ class RecoveryTests(unittest.TestCase):
         out = _probe_receipt(runner, op, 0)
         self.assertEqual(out["status"], "partial")
         self.assertEqual(out["resource"], "system:example.service")
+
+    def test_service_missing_is_unverifiable(self):
+        op = {
+            "kind": "service",
+            "unit": "example.service",
+            "user": False,
+            "original_enabled": False,
+            "original_active": False,
+            "applied_enabled": True,
+            "applied_active": True,
+        }
+        out = _probe_receipt(FakeRunner(unit_exists=False), op, 0)
+        self.assertEqual(out["status"], "unverifiable")
+        self.assertEqual(out["reason"], "unit_missing_or_unreadable")
 
 
 if __name__ == "__main__":
