@@ -55,9 +55,7 @@ def _probe_receipt(runner: Runner, op: dict[str, Any], index: int) -> dict[str, 
         entries = op.get("paths")
         if not isinstance(entries, list) or not entries:
             return {**result, "status": "unverifiable", "reason": "invalid_receipt"}
-        matched = 0
-        missing = 0
-        drifted = 0
+        matched = missing = drifted = 0
         for entry in entries:
             if (
                 not isinstance(entry, dict)
@@ -65,7 +63,10 @@ def _probe_receipt(runner: Runner, op: dict[str, Any], index: int) -> dict[str, 
                 or not isinstance(entry.get("digest"), str)
             ):
                 return {**result, "status": "unverifiable", "reason": "invalid_receipt"}
-            current = _tree_digest(Path(entry["path"]))
+            try:
+                current = _tree_digest(Path(entry["path"]))
+            except (OSError, RuntimeError):
+                return {**result, "status": "unverifiable", "reason": "managed_path_unreadable"}
             if current == "missing":
                 missing += 1
             elif current == entry["digest"]:
@@ -98,6 +99,8 @@ def _probe_receipt(runner: Runner, op: dict[str, Any], index: int) -> dict[str, 
         if not isinstance(name, str) or not name:
             return {**result, "status": "unverifiable", "reason": "invalid_receipt"}
         result["resource"] = name
+        if not runner.exists("flatpak"):
+            return {**result, "status": "unverifiable", "reason": "flatpak_unavailable"}
         return {**result, "status": "applied" if _flatpak_remote_exists(runner, name) else "original"}
 
     if kind == "flatpak_app":
@@ -105,6 +108,8 @@ def _probe_receipt(runner: Runner, op: dict[str, Any], index: int) -> dict[str, 
         if not isinstance(app_id, str) or not app_id:
             return {**result, "status": "unverifiable", "reason": "invalid_receipt"}
         result["resource"] = app_id
+        if not runner.exists("flatpak"):
+            return {**result, "status": "unverifiable", "reason": "flatpak_unavailable"}
         return {**result, "status": "applied" if _flatpak_app_installed(runner, app_id) else "original"}
 
     if kind == "gnome_extension":
@@ -119,7 +124,10 @@ def _probe_receipt(runner: Runner, op: dict[str, Any], index: int) -> dict[str, 
             digest = op.get("digest")
             if not isinstance(path, str) or not isinstance(digest, str):
                 return {**result, "status": "unverifiable", "reason": "invalid_receipt"}
-            current_digest = _tree_digest(Path(path))
+            try:
+                current_digest = _tree_digest(Path(path))
+            except (OSError, RuntimeError):
+                return {**result, "status": "unverifiable", "reason": "extension_path_unreadable"}
             if current_digest == "missing":
                 return {
                     **result,
@@ -135,7 +143,6 @@ def _probe_receipt(runner: Runner, op: dict[str, Any], index: int) -> dict[str, 
                 "enabled": enabled,
                 "files": "matching",
             }
-
         original_enabled = bool(op.get("original_enabled"))
         applied_enabled = bool(op.get("applied_enabled", True))
         if enabled == applied_enabled:
@@ -151,6 +158,9 @@ def _probe_receipt(runner: Runner, op: dict[str, Any], index: int) -> dict[str, 
             return {**result, "status": "unverifiable", "reason": "invalid_receipt"}
         result["resource"] = ("user:" if user else "system:") + unit
         systemctl = ["systemctl", "--user"] if user else ["systemctl"]
+        probe_cp = runner.run(systemctl + ["cat", unit], check=False)
+        if probe_cp.returncode != 0:
+            return {**result, "status": "unverifiable", "reason": "unit_missing_or_unreadable"}
         enabled_cp = runner.run(systemctl + ["is-enabled", unit], check=False)
         active_cp = runner.run(systemctl + ["is-active", unit], check=False)
         enabled = (enabled_cp.stdout or "").strip() == "enabled"
