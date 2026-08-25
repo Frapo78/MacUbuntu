@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+from .external_core import (
+    _enabled_extensions,
+    _flatpak_app_installed,
+    _flatpak_remote_exists,
+    _tree_digest,
+    apt_repository_present,
+)
 from .system import gsettings_get
 from .util import Runner, package_installed
 
@@ -43,9 +51,135 @@ def _probe_receipt(runner: Runner, op: dict[str, Any], index: int) -> dict[str, 
             "owned_packages_expected": len(added),
         }
 
-    # Unknown/external receipts can contain paths, commands or other local data.
-    # Do not echo them into recovery JSON until that kind has a dedicated,
-    # privacy-reviewed probe.
+    if kind == "owned_paths":
+        entries = op.get("paths")
+        if not isinstance(entries, list) or not entries:
+            return {**result, "status": "unverifiable", "reason": "invalid_receipt"}
+        matched = missing = drifted = 0
+        for entry in entries:
+            if (
+                not isinstance(entry, dict)
+                or not isinstance(entry.get("path"), str)
+                or not isinstance(entry.get("digest"), str)
+            ):
+                return {**result, "status": "unverifiable", "reason": "invalid_receipt"}
+            try:
+                current = _tree_digest(Path(entry["path"]))
+            except (OSError, RuntimeError):
+                return {**result, "status": "unverifiable", "reason": "managed_path_unreadable"}
+            if current == "missing":
+                missing += 1
+            elif current == entry["digest"]:
+                matched += 1
+            else:
+                drifted += 1
+        summary = {
+            **result,
+            "managed_paths": len(entries),
+            "matching_paths": matched,
+            "missing_paths": missing,
+        }
+        if drifted:
+            return {**summary, "status": "drifted", "drifted_paths": drifted}
+        if matched == len(entries):
+            return {**summary, "status": "applied"}
+        if missing == len(entries):
+            return {**summary, "status": "original"}
+        return {**summary, "status": "partial"}
+
+    if kind == "apt_repository":
+        ppa = op.get("ppa")
+        if not isinstance(ppa, str) or not ppa.startswith("ppa:"):
+            return {**result, "status": "unverifiable", "reason": "invalid_receipt"}
+        result["resource"] = ppa
+        return {**result, "status": "applied" if apt_repository_present(ppa) else "original"}
+
+    if kind == "flatpak_remote":
+        name = op.get("resource")
+        if not isinstance(name, str) or not name:
+            return {**result, "status": "unverifiable", "reason": "invalid_receipt"}
+        result["resource"] = name
+        if not runner.exists("flatpak"):
+            return {**result, "status": "unverifiable", "reason": "flatpak_unavailable"}
+        return {**result, "status": "applied" if _flatpak_remote_exists(runner, name) else "original"}
+
+    if kind == "flatpak_app":
+        app_id = op.get("resource")
+        if not isinstance(app_id, str) or not app_id:
+            return {**result, "status": "unverifiable", "reason": "invalid_receipt"}
+        result["resource"] = app_id
+        if not runner.exists("flatpak"):
+            return {**result, "status": "unverifiable", "reason": "flatpak_unavailable"}
+        return {**result, "status": "applied" if _flatpak_app_installed(runner, app_id) else "original"}
+
+    if kind == "gnome_extension":
+        uuid = op.get("resource")
+        if not isinstance(uuid, str) or not uuid:
+            return {**result, "status": "unverifiable", "reason": "invalid_receipt"}
+        result["resource"] = uuid
+        enabled = uuid in _enabled_extensions(runner)
+        installed_by_macubuntu = bool(op.get("installed_by_macubuntu"))
+        if installed_by_macubuntu:
+            path = op.get("path")
+            digest = op.get("digest")
+            if not isinstance(path, str) or not isinstance(digest, str):
+                return {**result, "status": "unverifiable", "reason": "invalid_receipt"}
+            try:
+                current_digest = _tree_digest(Path(path))
+            except (OSError, RuntimeError):
+                return {**result, "status": "unverifiable", "reason": "extension_path_unreadable"}
+            if current_digest == "missing":
+                return {
+                    **result,
+                    "status": "partial" if enabled else "original",
+                    "enabled": enabled,
+                    "files": "missing",
+                }
+            if current_digest != digest:
+                return {**result, "status": "drifted", "enabled": enabled, "files": "drifted"}
+            return {
+                **result,
+                "status": "applied" if enabled else "partial",
+                "enabled": enabled,
+                "files": "matching",
+            }
+        original_enabled = bool(op.get("original_enabled"))
+        applied_enabled = bool(op.get("applied_enabled", True))
+        if enabled == applied_enabled:
+            return {**result, "status": "applied", "enabled": enabled}
+        if enabled == original_enabled:
+            return {**result, "status": "original", "enabled": enabled}
+        return {**result, "status": "drifted", "enabled": enabled}
+
+    if kind == "service":
+        unit = op.get("unit")
+        user = op.get("user")
+        if not isinstance(unit, str) or not unit or not isinstance(user, bool):
+            return {**result, "status": "unverifiable", "reason": "invalid_receipt"}
+        result["resource"] = ("user:" if user else "system:") + unit
+        systemctl = ["systemctl", "--user"] if user else ["systemctl"]
+        probe_cp = runner.run(systemctl + ["cat", unit], check=False)
+        if probe_cp.returncode != 0:
+            return {**result, "status": "unverifiable", "reason": "unit_missing_or_unreadable"}
+        enabled_cp = runner.run(systemctl + ["is-enabled", unit], check=False)
+        active_cp = runner.run(systemctl + ["is-active", unit], check=False)
+        enabled = (enabled_cp.stdout or "").strip() == "enabled"
+        active = (active_cp.stdout or "").strip() == "active"
+        if (
+            enabled == bool(op.get("applied_enabled", True))
+            and active == bool(op.get("applied_active", True))
+        ):
+            return {**result, "status": "applied", "enabled": enabled, "active": active}
+        if (
+            enabled == bool(op.get("original_enabled"))
+            and active == bool(op.get("original_active"))
+        ):
+            return {**result, "status": "original", "enabled": enabled, "active": active}
+        return {**result, "status": "partial", "enabled": enabled, "active": active}
+
+    # Unknown receipts can contain paths, commands or other local data. Do not
+    # echo arbitrary fields until that kind has a dedicated privacy-reviewed
+    # probe.
     return {**result, "status": "unverifiable", "reason": "probe_not_implemented"}
 
 

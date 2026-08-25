@@ -1,11 +1,28 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
-from macubuntu_app.recovery import inspect_recovery
+from macubuntu_app.recovery import _probe_receipt, inspect_recovery
 
 
 class FakeRunner:
-    pass
+    def __init__(self, enabled="enabled", active="active", unit_exists=True, flatpak=True):
+        self.enabled = enabled
+        self.active = active
+        self.unit_exists = unit_exists
+        self.flatpak = flatpak
+
+    def exists(self, command):
+        return self.flatpak if command == "flatpak" else True
+
+    def run(self, cmd, check=False):
+        if "cat" in cmd:
+            return SimpleNamespace(stdout="", returncode=0 if self.unit_exists else 1)
+        if "is-enabled" in cmd:
+            return SimpleNamespace(stdout=self.enabled + "\n", returncode=0)
+        if "is-active" in cmd:
+            return SimpleNamespace(stdout=self.active + "\n", returncode=0)
+        return SimpleNamespace(stdout="", returncode=0)
 
 
 class FakeStore:
@@ -138,6 +155,125 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(out["status"], "transaction_interrupted")
         self.assertEqual(out["classification"], "no_receipted_mutations")
         self.assertEqual(out["decision"], "manual_review")
+
+    @patch("macubuntu_app.recovery._tree_digest", side_effect=["abc", "abc"])
+    def test_owned_paths_applied_without_path_leak(self, _digest):
+        op = {
+            "kind": "owned_paths",
+            "resource": "theme",
+            "paths": [
+                {"path": "/home/alice/.local/a", "digest": "abc"},
+                {"path": "/home/alice/.local/b", "digest": "abc"},
+            ],
+        }
+        out = _probe_receipt(FakeRunner(), op, 0)
+        self.assertEqual(out["status"], "applied")
+        self.assertEqual(out["managed_paths"], 2)
+        self.assertNotIn("alice", str(out))
+
+    @patch("macubuntu_app.recovery._tree_digest", side_effect=["abc", "missing"])
+    def test_owned_paths_partial_is_inconsistent(self, _digest):
+        op = {
+            "kind": "owned_paths",
+            "paths": [
+                {"path": "/tmp/a", "digest": "abc"},
+                {"path": "/tmp/b", "digest": "abc"},
+            ],
+        }
+        out = inspect_recovery(
+            FakeRunner(),
+            FakeStore({"transaction": transaction(), "operations": [op]}),
+        )
+        self.assertEqual(out["evidence"][0]["status"], "partial")
+        self.assertEqual(out["classification"], "inconsistent")
+
+    @patch("macubuntu_app.recovery._tree_digest", side_effect=PermissionError("denied"))
+    def test_owned_paths_unreadable_is_fail_closed(self, _digest):
+        op = {"kind": "owned_paths", "paths": [{"path": "/root/private", "digest": "abc"}]}
+        out = _probe_receipt(FakeRunner(), op, 0)
+        self.assertEqual(out["status"], "unverifiable")
+        self.assertEqual(out["reason"], "managed_path_unreadable")
+        self.assertNotIn("/root/private", str(out))
+
+    @patch("macubuntu_app.recovery.apt_repository_present", return_value=True)
+    def test_apt_repository_applied(self, _present):
+        out = _probe_receipt(FakeRunner(), {"kind": "apt_repository", "ppa": "ppa:owner/archive"}, 0)
+        self.assertEqual(out["status"], "applied")
+
+    @patch("macubuntu_app.recovery._flatpak_remote_exists", return_value=False)
+    def test_flatpak_remote_absent_is_original(self, _present):
+        out = _probe_receipt(FakeRunner(), {"kind": "flatpak_remote", "resource": "flathub"}, 0)
+        self.assertEqual(out["status"], "original")
+
+    def test_flatpak_unavailable_is_unverifiable(self):
+        out = _probe_receipt(
+            FakeRunner(flatpak=False),
+            {"kind": "flatpak_app", "resource": "org.example.App"},
+            0,
+        )
+        self.assertEqual(out["status"], "unverifiable")
+        self.assertEqual(out["reason"], "flatpak_unavailable")
+
+    @patch("macubuntu_app.recovery._flatpak_app_installed", return_value=True)
+    def test_flatpak_app_present_is_applied(self, _present):
+        out = _probe_receipt(FakeRunner(), {"kind": "flatpak_app", "resource": "org.example.App"}, 0)
+        self.assertEqual(out["status"], "applied")
+
+    @patch("macubuntu_app.recovery._enabled_extensions", return_value=["test@example"])
+    @patch("macubuntu_app.recovery._tree_digest", return_value="good")
+    def test_owned_extension_applied_without_path_leak(self, _digest, _enabled):
+        op = {
+            "kind": "gnome_extension",
+            "resource": "test@example",
+            "installed_by_macubuntu": True,
+            "path": "/home/alice/.local/share/gnome-shell/extensions/test@example",
+            "digest": "good",
+        }
+        out = _probe_receipt(FakeRunner(), op, 0)
+        self.assertEqual(out["status"], "applied")
+        self.assertNotIn("/home/alice", str(out))
+
+    @patch("macubuntu_app.recovery._enabled_extensions", return_value=[])
+    @patch("macubuntu_app.recovery._tree_digest", return_value="good")
+    def test_owned_extension_disabled_with_matching_files_is_partial(self, _digest, _enabled):
+        op = {
+            "kind": "gnome_extension",
+            "resource": "test@example",
+            "installed_by_macubuntu": True,
+            "path": "/tmp/test@example",
+            "digest": "good",
+        }
+        out = _probe_receipt(FakeRunner(), op, 0)
+        self.assertEqual(out["status"], "partial")
+
+    def test_service_partial_state_is_detected_without_sudo(self):
+        op = {
+            "kind": "service",
+            "unit": "example.service",
+            "user": False,
+            "original_enabled": False,
+            "original_active": False,
+            "applied_enabled": True,
+            "applied_active": True,
+        }
+        runner = FakeRunner(enabled="enabled", active="inactive")
+        out = _probe_receipt(runner, op, 0)
+        self.assertEqual(out["status"], "partial")
+        self.assertEqual(out["resource"], "system:example.service")
+
+    def test_service_missing_is_unverifiable(self):
+        op = {
+            "kind": "service",
+            "unit": "example.service",
+            "user": False,
+            "original_enabled": False,
+            "original_active": False,
+            "applied_enabled": True,
+            "applied_active": True,
+        }
+        out = _probe_receipt(FakeRunner(unit_exists=False), op, 0)
+        self.assertEqual(out["status"], "unverifiable")
+        self.assertEqual(out["reason"], "unit_missing_or_unreadable")
 
 
 if __name__ == "__main__":
