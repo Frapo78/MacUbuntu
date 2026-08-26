@@ -5,7 +5,7 @@ from typing import Any, Callable
 from . import __version__
 from .modules import ALL_MODULES
 from .operations import uninstall_operations
-from .state import StateStore, now_iso
+from .state import StateStore, now_iso, privacy_safe_state
 from .system import audit_system
 from .util import Runner
 
@@ -131,7 +131,7 @@ class Engine:
             "operation_count": owned_operations,
             "plan_summary": summary,
             "recovery_required": bool(state.get("transaction")),
-            "state": state,
+            "state": privacy_safe_state(state),
         }
 
     def uninstall(
