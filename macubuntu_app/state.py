@@ -145,6 +145,14 @@ def _public_transaction(record: dict[str, Any] | None) -> dict[str, Any] | None:
     return summary
 
 
+def privacy_safe_state(state: dict[str, Any]) -> dict[str, Any]:
+    public = deepcopy(state)
+    transaction = public.get("transaction")
+    if isinstance(transaction, dict):
+        transaction["pending_mutation"] = _public_transaction(transaction).get("pending_mutation")
+    return public
+
+
 def _validate_state(data: Any, *, path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise StateValidationError("state root must be an object", path=path)
