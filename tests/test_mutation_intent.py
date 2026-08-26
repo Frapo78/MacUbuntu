@@ -129,6 +129,9 @@ class MutationIntentTests(unittest.TestCase):
         ), patch(
             "macubuntu_app.operations.installed_deb_packages",
             side_effect=lambda _runner: set(self.runner.installed),
+        ), patch(
+            "macubuntu_app.operations.apt_base_command",
+            return_value=["apt-get"],
         ):
             result = apply_apt_bundle(
                 runner=self.runner,
