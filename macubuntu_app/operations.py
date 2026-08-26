@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from .state import StateStore, now_iso
 from .system import gsettings_get, gsettings_set
 from .util import Runner, apt_base_command, installed_deb_packages, package_installed
+
+
+def _value_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _find_setting_receipt(state: dict[str, Any], schema: str, key: str) -> dict[str, Any] | None:
@@ -35,6 +40,13 @@ def apply_gsetting(*, runner: Runner, store: StateStore, state: dict[str, Any], 
         return {"kind": "gsettings", "resource": f"{schema}::{key}", "status": "would_change", "from": current, "to": desired, "managed": receipt is not None}
 
     original = receipt["original"] if receipt else current
+    pending = store.prepare_mutation(
+        state,
+        app_version,
+        kind="gsettings_set",
+        resource=f"{schema}::{key}",
+        evidence={"before_sha256": _value_digest(current), "desired_sha256": _value_digest(desired)},
+    )
     gsettings_set(runner, schema, key, desired)
     created_receipt = receipt is None
     previous_applied = receipt.get("applied") if receipt else None
@@ -49,7 +61,9 @@ def apply_gsetting(*, runner: Runner, store: StateStore, state: dict[str, Any], 
         store.save(state, app_version)
     except Exception:
         # GSettings is cheap to restore. Never leave a setting mutated merely
-        # because its ownership receipt could not be persisted.
+        # because its ownership receipt could not be persisted. The persisted
+        # pending mutation is intentionally left in place if state persistence
+        # is unhealthy, so doctor can fail closed on the next run.
         gsettings_set(runner, schema, key, current)
         if created_receipt:
             state["operations"].remove(receipt)
@@ -60,6 +74,7 @@ def apply_gsetting(*, runner: Runner, store: StateStore, state: dict[str, Any], 
             else:
                 receipt["updated_at"] = previous_updated_at
         raise
+    store.clear_pending_mutation(state, app_version, mutation_id=pending["id"])
     return {"kind": "gsettings", "resource": f"{schema}::{key}", "status": "changed", "from": current, "to": desired}
 
 
@@ -72,6 +87,13 @@ def apply_apt_bundle(*, runner: Runner, store: StateStore, state: dict[str, Any]
         return {"kind": "apt_bundle", "resource": ",".join(requested), "status": "would_install", "packages": missing}
 
     before = installed_deb_packages(runner)
+    pending = store.prepare_mutation(
+        state,
+        app_version,
+        kind="apt_install",
+        resource=",".join(requested),
+        evidence={"missing_before": list(missing)},
+    )
     runner.run(apt_base_command() + ["install", "-y", *missing], capture=None)
     after = installed_deb_packages(runner)
     added = sorted(after - before)
@@ -82,6 +104,7 @@ def apply_apt_bundle(*, runner: Runner, store: StateStore, state: dict[str, Any]
         receipt["added"] = sorted(set(receipt.get("added", [])) | set(added))
         receipt["updated_at"] = now_iso()
     store.save(state, app_version)
+    store.clear_pending_mutation(state, app_version, mutation_id=pending["id"])
     return {"kind": "apt_bundle", "resource": ",".join(requested), "status": "installed", "requested": missing, "added": added}
 
 
@@ -104,10 +127,18 @@ def uninstall_operations(*, runner: Runner, store: StateStore, state: dict[str, 
             if dry_run:
                 results.append({"kind": "gsettings", "resource": f"{schema}::{key}", "status": "would_restore", "from": current, "to": original, "forced": bool(drifted and force)})
                 continue
+            pending = store.prepare_mutation(
+                state,
+                app_version,
+                kind="gsettings_restore",
+                resource=f"{schema}::{key}",
+                evidence={"before_sha256": _value_digest(current), "original_sha256": _value_digest(original)},
+            )
             gsettings_set(runner, schema, key, original)
             results.append({"kind": "gsettings", "resource": f"{schema}::{key}", "status": "restored", "from": current, "to": original, "forced": bool(drifted and force)})
             state["operations"].remove(op)
             store.save(state, app_version)
+            store.clear_pending_mutation(state, app_version, mutation_id=pending["id"])
 
         elif op.get("kind") == "apt_bundle":
             added = [p for p in op.get("added", []) if package_installed(runner, p)]
@@ -160,10 +191,18 @@ def uninstall_operations(*, runner: Runner, store: StateStore, state: dict[str, 
             if dry_run:
                 results.append({"kind": "apt_bundle", "resource": ",".join(op.get("requested", [])), "status": "would_remove", "packages": added, "would_also_remove": extra, "forced": bool(extra and force)})
                 continue
+            pending = store.prepare_mutation(
+                state,
+                app_version,
+                kind="apt_purge",
+                resource=",".join(op.get("requested", [])),
+                evidence={"packages_present_before": list(added)},
+            )
             runner.run(apt_base_command() + ["purge", "-y", *added], capture=None)
             results.append({"kind": "apt_bundle", "resource": ",".join(op.get("requested", [])), "status": "removed", "packages": added, "forced": bool(extra and force)})
             state["operations"].remove(op)
             store.save(state, app_version)
+            store.clear_pending_mutation(state, app_version, mutation_id=pending["id"])
         else:
             external = uninstall_external_operation(
                 op=op, runner=runner, store=store, state=state, app_version=app_version,

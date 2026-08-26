@@ -20,11 +20,15 @@ Before replacing a valid state, MacUbuntu copies it to `state.json.bak`. The bac
 
 ### Transaction interruption journal
 
-Every real `apply`, `macify` and `uninstall` now writes an `in_progress` transaction marker to `state.json` before the first module or receipt mutation. The marker contains a random run ID, operation name, MacUbuntu version, start time and the number of owned operation receipts at the start of the run. Successful completion atomically moves that record to `last_transaction` with `status: committed`, completion time and the final receipt count.
+Every real `apply`, `macify` and `uninstall` writes an `in_progress` transaction marker to `state.json` before the first module or receipt mutation. The marker contains a random run ID, operation name, MacUbuntu version, start time and the number of owned operation receipts at the start of the run. Successful completion atomically moves that record to `last_transaction` with `status: committed`, completion time and the final receipt count.
 
-If the process, host or desktop session dies before commit, the active marker remains durable. `StateStore.health()` then reports `transaction_interrupted` and `doctor` blocks further mutation instead of assuming that the backup, current receipts or machine state are authoritative. `status --json` also exposes `recovery_required` plus the transaction evidence already stored in state.
+The core GSettings and APT mutation paths now add a second durability boundary inside the transaction. Immediately before changing the machine they persist one `pending_mutation` record containing a separate random mutation ID, mutation kind, preparation time and the minimum evidence required to identify the pre-mutation state. The record is cleared only after the corresponding ownership receipt/state update has been persisted. A transaction cannot be committed while a pending mutation remains.
 
-This journal deliberately records no usernames, arbitrary home paths, environment variables, tokens, network identifiers or command output. It is ownership/recovery metadata only.
+For GSettings, potentially sensitive setting values are never copied verbatim into mutation-intent evidence. MacUbuntu stores SHA-256 fingerprints of the before/target values, which are sufficient for a future read-only comparison without recording wallpaper paths or other arbitrary values a setting may contain. APT intent evidence contains only package names that were absent or present immediately before the requested install/purge.
+
+If the process, host or desktop session dies before commit, the active marker remains durable. If it dies after a mutation was prepared but before the receipt boundary completes, `pending_mutation` remains durable as explicit evidence that the machine may have changed. `StateStore.health()` then reports `transaction_interrupted` and `doctor` blocks further mutation instead of assuming that the backup, current receipts or machine state are authoritative.
+
+Health and `status --json` expose only a privacy-safe pending-mutation summary (ID, kind, status and preparation time). The internal evidence object is deliberately redacted from these general JSON views. Recovery code may inspect the local state directly only through privacy-reviewed probes.
 
 The transaction marker is detection evidence, not an automatic rollback instruction. MacUbuntu still does not silently restore `state.json.bak`, purge packages, reset GSettings or overwrite user drift after an interrupted run.
 
@@ -45,7 +49,7 @@ The inspector compares the transaction baseline receipt count with the current s
 
 The report exposes a `classification` such as `receipts_consistent`, `inconsistent` or `no_receipted_mutations`, receipt/backup counts and per-receipt evidence. It deliberately sets `automatic_mutation: false` and `decision: manual_review` for every interrupted transaction.
 
-This conservative rule is important: a crash can occur after the machine was changed but before the corresponding receipt was written. A set of consistent receipts can therefore prove useful facts, but cannot yet prove that no unreceipted mutation exists.
+The persisted pending-mutation journal closes the former ambiguity for the core GSettings/APT boundary by proving which mutation had been prepared when a crash occurred. The current recovery inspector does not yet turn that evidence into an automatic repair decision, and external resource families still need the same pre-mutation journaling before a general `recover` command can be safe.
 
 ## External component failures
 
@@ -59,4 +63,4 @@ If MacUbuntu added a Flatpak remote and the user later installs other apps from 
 
 ## Remaining recovery boundary
 
-Issue #12 still tracks the mutating reconciliation layer. The read-only inspector now understands the currently managed receipt families used by the transformation engine, but MacUbuntu still must identify possible **unreceipted** mutations before it can offer a safe `recover` command. Until that proof exists, an interrupted transaction remains blocked and MacUbuntu will not reconstruct ownership, restore the backup or roll back from guesses.
+Issue #12 still tracks the mutating reconciliation layer. Before a general recovery command is enabled, the pre-mutation journal must be extended to the external mutation families (owned paths/source installs, GNOME extensions, APT repositories, Flatpak and services), and the read-only inspector must classify the durable pending intent against the real machine. Until those proofs exist, an interrupted transaction remains blocked and MacUbuntu will not reconstruct ownership, restore the backup or roll back from guesses.
