@@ -5,7 +5,12 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from macubuntu_app.operations import apply_apt_bundle, apply_gsetting
-from macubuntu_app.state import StateStore, StateValidationError, default_state
+from macubuntu_app.state import (
+    StateStore,
+    StateValidationError,
+    default_state,
+    privacy_safe_state,
+)
 
 
 class FakeRunner:
@@ -72,7 +77,7 @@ class MutationIntentTests(unittest.TestCase):
         self.assertEqual(committed["status"], "committed")
         self.assertNotIn("pending_mutation", committed)
 
-    def test_health_does_not_expose_pending_evidence(self):
+    def test_health_and_public_state_do_not_expose_pending_evidence(self):
         self.store.prepare_mutation(
             self.state,
             "0.6.0",
@@ -81,19 +86,25 @@ class MutationIntentTests(unittest.TestCase):
             evidence={"before": "'file:///home/alice/private.jpg'", "desired": "'x'"},
         )
         health = self.store.health()
-        rendered = str(health)
+        public = privacy_safe_state(self.state)
         self.assertEqual(health["status"], "transaction_interrupted")
         self.assertEqual(health["transaction"]["pending_mutation"]["kind"], "gsettings_set")
-        self.assertNotIn("alice", rendered)
-        self.assertNotIn("evidence", rendered)
+        self.assertNotIn("alice", str(health))
+        self.assertNotIn("alice", str(public))
+        self.assertNotIn("evidence", str(public["transaction"]["pending_mutation"]))
 
-    @patch("macubuntu_app.operations.gsettings_get", return_value="'a'")
+    @patch("macubuntu_app.operations.gsettings_get", return_value="'file:///home/alice/private.jpg'")
     @patch("macubuntu_app.operations.gsettings_set")
-    def test_gsettings_journal_is_persisted_before_mutation_and_cleared_after_receipt(self, set_value, _get_value):
+    def test_gsettings_journal_is_persisted_before_mutation_hashes_values_and_clears_after_receipt(self, set_value, _get_value):
         self.store.events.clear()
 
         def assert_intent_precedes_mutation(*_args):
             self.assertEqual(self.store.events[0], ("prepare", "gsettings_set"))
+            pending = self.state["transaction"]["pending_mutation"]
+            evidence = pending["evidence"]
+            self.assertEqual(set(evidence), {"before_sha256", "desired_sha256"})
+            self.assertEqual(len(evidence["before_sha256"]), 64)
+            self.assertNotIn("alice", str(evidence))
 
         set_value.side_effect = assert_intent_precedes_mutation
         result = apply_gsetting(
@@ -102,8 +113,8 @@ class MutationIntentTests(unittest.TestCase):
             state=self.state,
             app_version="0.6.0",
             schema="org.example",
-            key="key",
-            desired="'b'",
+            key="wallpaper",
+            desired="'file:///tmp/macubuntu.jpg'",
             dry_run=False,
         )
         self.assertEqual(result["status"], "changed")
