@@ -67,6 +67,25 @@ def default_state() -> dict[str, Any]:
     }
 
 
+def _validate_pending_mutation(record: Any, *, path: Path) -> dict[str, Any] | None:
+    if record is None:
+        return None
+    if not isinstance(record, dict):
+        raise StateValidationError("pending mutation metadata must be an object or null", path=path)
+    required_strings = ("id", "kind", "status", "prepared_at")
+    if any(not isinstance(record.get(key), str) or not record.get(key) for key in required_strings):
+        raise StateValidationError("pending mutation metadata is incomplete", path=path)
+    if record.get("status") != "prepared":
+        raise StateValidationError("pending mutation status must be prepared", path=path)
+    resource = record.get("resource")
+    if resource is not None and not isinstance(resource, str):
+        raise StateValidationError("pending mutation resource must be a string or null", path=path)
+    evidence = record.get("evidence", {})
+    if not isinstance(evidence, dict):
+        raise StateValidationError("pending mutation evidence must be an object", path=path)
+    return deepcopy(record)
+
+
 def _validate_transaction(record: Any, *, path: Path, active: bool) -> dict[str, Any] | None:
     if record is None:
         return None
@@ -85,13 +104,45 @@ def _validate_transaction(record: Any, *, path: Path, active: bool) -> dict[str,
     if not isinstance(baseline, int) or baseline < 0:
         raise StateValidationError("transaction baseline operation count is invalid", path=path)
 
-    if not active:
+    normalized = deepcopy(record)
+    if active:
+        normalized["pending_mutation"] = _validate_pending_mutation(
+            record.get("pending_mutation"), path=path
+        )
+    else:
+        if record.get("pending_mutation") is not None:
+            raise StateValidationError("committed transaction cannot contain a pending mutation", path=path)
         if not isinstance(record.get("completed_at"), str) or not record.get("completed_at"):
             raise StateValidationError("committed transaction is missing completed_at", path=path)
         final_count = record.get("final_operation_count")
         if not isinstance(final_count, int) or final_count < 0:
             raise StateValidationError("committed transaction final operation count is invalid", path=path)
-    return deepcopy(record)
+    return normalized
+
+
+def _public_transaction(record: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(record, dict):
+        return None
+    summary = {
+        key: record.get(key)
+        for key in (
+            "id",
+            "operation",
+            "status",
+            "started_at",
+            "app_version",
+            "baseline_operation_count",
+        )
+    }
+    pending = record.get("pending_mutation")
+    if isinstance(pending, dict):
+        summary["pending_mutation"] = {
+            key: pending.get(key)
+            for key in ("id", "kind", "status", "prepared_at")
+        }
+    else:
+        summary["pending_mutation"] = None
+    return summary
 
 
 def _validate_state(data: Any, *, path: Path) -> dict[str, Any]:
@@ -177,7 +228,7 @@ class StateStore:
             return {
                 "ok": False,
                 "status": "transaction_interrupted",
-                "transaction": transaction,
+                "transaction": _public_transaction(transaction),
                 "operation_count": len(state.get("operations", [])),
                 "profile_applied": bool(state.get("profile", {}).get("applied")),
                 **result,
@@ -223,21 +274,75 @@ class StateStore:
             "started_at": now_iso(),
             "app_version": app_version,
             "baseline_operation_count": len(state.get("operations", [])),
+            "pending_mutation": None,
         }
         state["transaction"] = transaction
         self.save(state, app_version)
         return deepcopy(transaction)
 
+    def prepare_mutation(
+        self,
+        state: dict[str, Any],
+        app_version: str,
+        *,
+        kind: str,
+        resource: str | None = None,
+        evidence: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        transaction = state.get("transaction")
+        if not isinstance(transaction, dict):
+            raise StateValidationError("no transaction is in progress", path=self.path)
+        if transaction.get("pending_mutation"):
+            raise StateValidationError("a mutation is already pending", path=self.path)
+        if not isinstance(kind, str) or not kind:
+            raise StateValidationError("mutation kind is required", path=self.path)
+        if resource is not None and not isinstance(resource, str):
+            raise StateValidationError("mutation resource must be a string or null", path=self.path)
+        if evidence is not None and not isinstance(evidence, dict):
+            raise StateValidationError("mutation evidence must be an object", path=self.path)
+        pending = {
+            "id": str(uuid4()),
+            "kind": kind,
+            "resource": resource,
+            "status": "prepared",
+            "prepared_at": now_iso(),
+            "evidence": deepcopy(evidence or {}),
+        }
+        transaction["pending_mutation"] = pending
+        self.save(state, app_version)
+        return deepcopy(pending)
+
+    def clear_pending_mutation(
+        self,
+        state: dict[str, Any],
+        app_version: str,
+        *,
+        mutation_id: str | None = None,
+    ) -> None:
+        transaction = state.get("transaction")
+        if not isinstance(transaction, dict):
+            raise StateValidationError("no transaction is in progress", path=self.path)
+        pending = transaction.get("pending_mutation")
+        if not isinstance(pending, dict):
+            raise StateValidationError("no mutation is pending", path=self.path)
+        if mutation_id is not None and pending.get("id") != mutation_id:
+            raise StateValidationError("pending mutation identity mismatch", path=self.path)
+        transaction["pending_mutation"] = None
+        self.save(state, app_version)
+
     def commit_transaction(self, state: dict[str, Any], app_version: str) -> dict[str, Any]:
         transaction = state.get("transaction")
         if not transaction:
             raise StateValidationError("no transaction is in progress", path=self.path)
+        if transaction.get("pending_mutation"):
+            raise StateValidationError("cannot commit while a mutation is pending", path=self.path)
         committed = {
             **transaction,
             "status": "committed",
             "completed_at": now_iso(),
             "final_operation_count": len(state.get("operations", [])),
         }
+        committed.pop("pending_mutation", None)
         state["transaction"] = None
         state["last_transaction"] = committed
         self.save(state, app_version)
