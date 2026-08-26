@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from .state import StateStore, now_iso
 from .system import gsettings_get, gsettings_set
 from .util import Runner, apt_base_command, installed_deb_packages, package_installed
+
+
+def _value_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _find_setting_receipt(state: dict[str, Any], schema: str, key: str) -> dict[str, Any] | None:
@@ -40,7 +45,7 @@ def apply_gsetting(*, runner: Runner, store: StateStore, state: dict[str, Any], 
         app_version,
         kind="gsettings_set",
         resource=f"{schema}::{key}",
-        evidence={"before": current, "desired": desired},
+        evidence={"before_sha256": _value_digest(current), "desired_sha256": _value_digest(desired)},
     )
     gsettings_set(runner, schema, key, desired)
     created_receipt = receipt is None
@@ -127,7 +132,7 @@ def uninstall_operations(*, runner: Runner, store: StateStore, state: dict[str, 
                 app_version,
                 kind="gsettings_restore",
                 resource=f"{schema}::{key}",
-                evidence={"before": current, "original": original},
+                evidence={"before_sha256": _value_digest(current), "original_sha256": _value_digest(original)},
             )
             gsettings_set(runner, schema, key, original)
             results.append({"kind": "gsettings", "resource": f"{schema}::{key}", "status": "restored", "from": current, "to": original, "forced": bool(drifted and force)})
