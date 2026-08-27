@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,97 @@ from .external_core import (
 )
 from .system import gsettings_get
 from .util import Runner, package_installed
+
+
+def _value_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _probe_pending_mutation(runner: Runner, pending: dict[str, Any]) -> dict[str, Any]:
+    """Classify one durable pre-mutation intent without exposing raw evidence."""
+    kind = pending.get("kind", "unknown")
+    result: dict[str, Any] = {
+        "id": pending.get("id"),
+        "kind": kind,
+        "status": "unverifiable",
+    }
+    resource = pending.get("resource")
+    evidence = pending.get("evidence")
+    if not isinstance(evidence, dict):
+        return {**result, "reason": "invalid_pending_evidence"}
+
+    if kind in {"gsettings_set", "gsettings_restore"}:
+        if not isinstance(resource, str) or "::" not in resource:
+            return {**result, "reason": "invalid_pending_resource"}
+        schema, key = resource.split("::", 1)
+        if not schema or not key:
+            return {**result, "reason": "invalid_pending_resource"}
+        current = gsettings_get(runner, schema, key)
+        if current is None:
+            return {
+                **result,
+                "resource": resource,
+                "reason": "schema_or_key_missing",
+            }
+        before_digest = evidence.get("before_sha256")
+        target_key = "desired_sha256" if kind == "gsettings_set" else "original_sha256"
+        target_digest = evidence.get(target_key)
+        if not isinstance(before_digest, str) or not isinstance(target_digest, str):
+            return {
+                **result,
+                "resource": resource,
+                "reason": "invalid_pending_evidence",
+            }
+        current_digest = _value_digest(current)
+        if current_digest == target_digest:
+            status = "applied"
+        elif current_digest == before_digest:
+            status = "original"
+        else:
+            status = "drifted"
+        return {
+            "id": pending.get("id"),
+            "kind": kind,
+            "resource": resource,
+            "status": status,
+        }
+
+    if kind in {"apt_install", "apt_purge"}:
+        evidence_key = "missing_before" if kind == "apt_install" else "packages_present_before"
+        packages = evidence.get(evidence_key)
+        if (
+            not isinstance(packages, list)
+            or not packages
+            or any(not isinstance(package, str) or not package for package in packages)
+        ):
+            return {**result, "reason": "invalid_pending_evidence"}
+        present = [package for package in packages if package_installed(runner, package)]
+        if kind == "apt_install":
+            if len(present) == len(packages):
+                status = "applied"
+            elif not present:
+                status = "original"
+            else:
+                status = "partial"
+        else:
+            if not present:
+                status = "applied"
+            elif len(present) == len(packages):
+                status = "original"
+            else:
+                status = "partial"
+        return {
+            "id": pending.get("id"),
+            "kind": kind,
+            "status": status,
+            "packages_checked": len(packages),
+            "packages_present": len(present),
+        }
+
+    # Pending evidence may contain private paths, commands or future resource
+    # details. Unknown kinds are therefore summarized without echoing resource
+    # or evidence fields until a dedicated privacy review exists.
+    return {**result, "reason": "probe_not_implemented"}
 
 
 def _probe_receipt(runner: Runner, op: dict[str, Any], index: int) -> dict[str, Any]:
@@ -187,8 +279,9 @@ def inspect_recovery(runner: Runner, store: Any) -> dict[str, Any]:
     """Inspect an interrupted transaction without mutating machine or state.
 
     A crash may happen after a machine mutation but before the corresponding
-    receipt is persisted. Current receipts can therefore prove inconsistencies,
-    but cannot by themselves prove that no unreceipted change exists.
+    receipt is persisted. Durable pending intent narrows that ambiguity for
+    privacy-reviewed mutation kinds, while unknown/external kinds still fail
+    closed until they gain equivalent probes.
     """
     health = store.health()
     if health.get("status") != "transaction_interrupted":
@@ -222,10 +315,14 @@ def inspect_recovery(runner: Runner, store: Any) -> dict[str, Any]:
         _probe_receipt(runner, op, baseline + offset)
         for offset, op in enumerate(transaction_receipts)
     ]
+    pending = transaction.get("pending_mutation")
+    pending_evidence = _probe_pending_mutation(runner, pending) if isinstance(pending, dict) else None
     inconsistent = any(
         item["status"] in {"original", "partial", "drifted", "unverifiable"}
         for item in evidence
     )
+    if pending_evidence and pending_evidence.get("status") in {"partial", "drifted", "unverifiable"}:
+        inconsistent = True
 
     backup_operation_count = None
     if isinstance(backup, dict):
@@ -237,6 +334,10 @@ def inspect_recovery(runner: Runner, store: Any) -> dict[str, Any]:
     if not transaction_receipts:
         classification = "no_receipted_mutations"
 
+    reason = "unreceipted_mutation_cannot_be_excluded"
+    if pending_evidence:
+        reason = "pending_mutation_requires_recovery"
+
     return {
         "ok": False,
         "required": True,
@@ -244,7 +345,7 @@ def inspect_recovery(runner: Runner, store: Any) -> dict[str, Any]:
         "classification": classification,
         "decision": "manual_review",
         "automatic_mutation": False,
-        "reason": "unreceipted_mutation_cannot_be_excluded",
+        "reason": reason,
         "transaction": {
             "id": transaction.get("id"),
             "operation": transaction.get("operation"),
@@ -260,5 +361,6 @@ def inspect_recovery(runner: Runner, store: Any) -> dict[str, Any]:
             "backup_operations": backup_operation_count,
         },
         "backup": {"status": backup_status},
+        "pending_mutation": pending_evidence,
         "evidence": evidence,
     }
