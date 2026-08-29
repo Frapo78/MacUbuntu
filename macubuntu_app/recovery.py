@@ -40,20 +40,12 @@ def _probe_pending_mutation(runner: Runner, pending: dict[str, Any]) -> dict[str
             return {**result, "reason": "invalid_pending_resource"}
         current = gsettings_get(runner, schema, key)
         if current is None:
-            return {
-                **result,
-                "resource": resource,
-                "reason": "schema_or_key_missing",
-            }
+            return {**result, "resource": resource, "reason": "schema_or_key_missing"}
         before_digest = evidence.get("before_sha256")
         target_key = "desired_sha256" if kind == "gsettings_set" else "original_sha256"
         target_digest = evidence.get(target_key)
         if not isinstance(before_digest, str) or not isinstance(target_digest, str):
-            return {
-                **result,
-                "resource": resource,
-                "reason": "invalid_pending_evidence",
-            }
+            return {**result, "resource": resource, "reason": "invalid_pending_evidence"}
         current_digest = _value_digest(current)
         if current_digest == target_digest:
             status = "applied"
@@ -61,12 +53,7 @@ def _probe_pending_mutation(runner: Runner, pending: dict[str, Any]) -> dict[str
             status = "original"
         else:
             status = "drifted"
-        return {
-            "id": pending.get("id"),
-            "kind": kind,
-            "resource": resource,
-            "status": status,
-        }
+        return {"id": pending.get("id"), "kind": kind, "resource": resource, "status": status}
 
     if kind in {"apt_install", "apt_purge"}:
         evidence_key = "missing_before" if kind == "apt_install" else "packages_present_before"
@@ -114,12 +101,7 @@ def _probe_pending_mutation(runner: Runner, pending: dict[str, Any]) -> dict[str
             status = "original"
         else:
             status = "drifted"
-        return {
-            "id": pending.get("id"),
-            "kind": kind,
-            "resource": resource,
-            "status": status,
-        }
+        return {"id": pending.get("id"), "kind": kind, "resource": resource, "status": status}
 
     if kind in {"flatpak_remote_add", "flatpak_app_install"}:
         if not isinstance(resource, str) or not resource:
@@ -141,12 +123,7 @@ def _probe_pending_mutation(runner: Runner, pending: dict[str, Any]) -> dict[str
             status = "original"
         else:
             status = "drifted"
-        return {
-            "id": pending.get("id"),
-            "kind": kind,
-            "resource": resource,
-            "status": status,
-        }
+        return {"id": pending.get("id"), "kind": kind, "resource": resource, "status": status}
 
     if kind == "service_enable_start":
         if not isinstance(resource, str) or ":" not in resource:
@@ -171,14 +148,12 @@ def _probe_pending_mutation(runner: Runner, pending: dict[str, Any]) -> dict[str
         if not resource.startswith(prefix) or not resource[len(prefix):]:
             return {**result, "reason": "invalid_pending_resource"}
         unit = resource[len(prefix):]
+        if "/" in unit or "\\" in unit or any(character.isspace() for character in unit):
+            return {**result, "reason": "invalid_pending_resource"}
         systemctl = ["systemctl", "--user"] if user else ["systemctl"]
         probe_cp = runner.run(systemctl + ["cat", unit], check=False)
         if probe_cp.returncode != 0:
-            return {
-                **result,
-                "resource": resource,
-                "reason": "unit_missing_or_unreadable",
-            }
+            return {**result, "resource": resource, "reason": "unit_missing_or_unreadable"}
         enabled_cp = runner.run(systemctl + ["is-enabled", unit], check=False)
         active_cp = runner.run(systemctl + ["is-active", unit], check=False)
         enabled = (enabled_cp.stdout or "").strip() == "enabled"
@@ -198,9 +173,6 @@ def _probe_pending_mutation(runner: Runner, pending: dict[str, Any]) -> dict[str
             "active": active,
         }
 
-    # Pending evidence may contain private paths, commands or future resource
-    # details. Unknown kinds are therefore summarized without echoing resource
-    # or evidence fields until a dedicated privacy review exists.
     return {**result, "reason": "probe_not_implemented"}
 
 
@@ -319,20 +291,10 @@ def _probe_receipt(runner: Runner, op: dict[str, Any], index: int) -> dict[str, 
             except (OSError, RuntimeError):
                 return {**result, "status": "unverifiable", "reason": "extension_path_unreadable"}
             if current_digest == "missing":
-                return {
-                    **result,
-                    "status": "partial" if enabled else "original",
-                    "enabled": enabled,
-                    "files": "missing",
-                }
+                return {**result, "status": "partial" if enabled else "original", "enabled": enabled, "files": "missing"}
             if current_digest != digest:
                 return {**result, "status": "drifted", "enabled": enabled, "files": "drifted"}
-            return {
-                **result,
-                "status": "applied" if enabled else "partial",
-                "enabled": enabled,
-                "files": "matching",
-            }
+            return {**result, "status": "applied" if enabled else "partial", "enabled": enabled, "files": "matching"}
         original_enabled = bool(op.get("original_enabled"))
         applied_enabled = bool(op.get("applied_enabled", True))
         if enabled == applied_enabled:
@@ -355,32 +317,16 @@ def _probe_receipt(runner: Runner, op: dict[str, Any], index: int) -> dict[str, 
         active_cp = runner.run(systemctl + ["is-active", unit], check=False)
         enabled = (enabled_cp.stdout or "").strip() == "enabled"
         active = (active_cp.stdout or "").strip() == "active"
-        if (
-            enabled == bool(op.get("applied_enabled", True))
-            and active == bool(op.get("applied_active", True))
-        ):
+        if enabled == bool(op.get("applied_enabled", True)) and active == bool(op.get("applied_active", True)):
             return {**result, "status": "applied", "enabled": enabled, "active": active}
-        if (
-            enabled == bool(op.get("original_enabled"))
-            and active == bool(op.get("original_active"))
-        ):
+        if enabled == bool(op.get("original_enabled")) and active == bool(op.get("original_active")):
             return {**result, "status": "original", "enabled": enabled, "active": active}
         return {**result, "status": "partial", "enabled": enabled, "active": active}
 
-    # Unknown receipts can contain paths, commands or other local data. Do not
-    # echo arbitrary fields until that kind has a dedicated privacy-reviewed
-    # probe.
     return {**result, "status": "unverifiable", "reason": "probe_not_implemented"}
 
 
 def inspect_recovery(runner: Runner, store: Any) -> dict[str, Any]:
-    """Inspect an interrupted transaction without mutating machine or state.
-
-    A crash may happen after a machine mutation but before the corresponding
-    receipt is persisted. Durable pending intent narrows that ambiguity for
-    privacy-reviewed mutation kinds, while unknown/external kinds still fail
-    closed until they gain equivalent probes.
-    """
     health = store.health()
     if health.get("status") != "transaction_interrupted":
         return {
@@ -409,10 +355,7 @@ def inspect_recovery(runner: Runner, store: Any) -> dict[str, Any]:
     except Exception:
         backup_status = "invalid"
 
-    evidence = [
-        _probe_receipt(runner, op, baseline + offset)
-        for offset, op in enumerate(transaction_receipts)
-    ]
+    evidence = [_probe_receipt(runner, op, baseline + offset) for offset, op in enumerate(transaction_receipts)]
     pending = transaction.get("pending_mutation")
     pending_evidence = _probe_pending_mutation(runner, pending) if isinstance(pending, dict) else None
     inconsistent = any(
