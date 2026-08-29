@@ -100,6 +100,106 @@ def _probe_pending_mutation(runner: Runner, pending: dict[str, Any]) -> dict[str
             "packages_present": len(present),
         }
 
+    if kind == "apt_repository_add":
+        if not isinstance(resource, str) or not resource.startswith("ppa:"):
+            return {**result, "reason": "invalid_pending_resource"}
+        before_present = evidence.get("before_present")
+        desired_present = evidence.get("desired_present")
+        if not isinstance(before_present, bool) or not isinstance(desired_present, bool):
+            return {**result, "resource": resource, "reason": "invalid_pending_evidence"}
+        current_present = apt_repository_present(resource)
+        if current_present == desired_present:
+            status = "applied"
+        elif current_present == before_present:
+            status = "original"
+        else:
+            status = "drifted"
+        return {
+            "id": pending.get("id"),
+            "kind": kind,
+            "resource": resource,
+            "status": status,
+        }
+
+    if kind in {"flatpak_remote_add", "flatpak_app_install"}:
+        if not isinstance(resource, str) or not resource:
+            return {**result, "reason": "invalid_pending_resource"}
+        before_present = evidence.get("before_present")
+        desired_present = evidence.get("desired_present")
+        if not isinstance(before_present, bool) or not isinstance(desired_present, bool):
+            return {**result, "reason": "invalid_pending_evidence"}
+        if not runner.exists("flatpak"):
+            return {**result, "reason": "flatpak_unavailable"}
+        current_present = (
+            _flatpak_remote_exists(runner, resource)
+            if kind == "flatpak_remote_add"
+            else _flatpak_app_installed(runner, resource)
+        )
+        if current_present == desired_present:
+            status = "applied"
+        elif current_present == before_present:
+            status = "original"
+        else:
+            status = "drifted"
+        return {
+            "id": pending.get("id"),
+            "kind": kind,
+            "resource": resource,
+            "status": status,
+        }
+
+    if kind == "service_enable_start":
+        if not isinstance(resource, str) or ":" not in resource:
+            return {**result, "reason": "invalid_pending_resource"}
+        user = evidence.get("user")
+        before_enabled = evidence.get("before_enabled")
+        before_active = evidence.get("before_active")
+        desired_enabled = evidence.get("desired_enabled")
+        desired_active = evidence.get("desired_active")
+        if not all(
+            isinstance(value, bool)
+            for value in (
+                user,
+                before_enabled,
+                before_active,
+                desired_enabled,
+                desired_active,
+            )
+        ):
+            return {**result, "reason": "invalid_pending_evidence"}
+        prefix = "user:" if user else "system:"
+        if not resource.startswith(prefix) or not resource[len(prefix):]:
+            return {**result, "reason": "invalid_pending_resource"}
+        unit = resource[len(prefix):]
+        if "/" in unit or "\\" in unit or any(character.isspace() for character in unit):
+            return {**result, "reason": "invalid_pending_resource"}
+        systemctl = ["systemctl", "--user"] if user else ["systemctl"]
+        probe_cp = runner.run(systemctl + ["cat", unit], check=False)
+        if probe_cp.returncode != 0:
+            return {
+                **result,
+                "resource": resource,
+                "reason": "unit_missing_or_unreadable",
+            }
+        enabled_cp = runner.run(systemctl + ["is-enabled", unit], check=False)
+        active_cp = runner.run(systemctl + ["is-active", unit], check=False)
+        enabled = (enabled_cp.stdout or "").strip() == "enabled"
+        active = (active_cp.stdout or "").strip() == "active"
+        if enabled == desired_enabled and active == desired_active:
+            status = "applied"
+        elif enabled == before_enabled and active == before_active:
+            status = "original"
+        else:
+            status = "partial"
+        return {
+            "id": pending.get("id"),
+            "kind": kind,
+            "resource": resource,
+            "status": status,
+            "enabled": enabled,
+            "active": active,
+        }
+
     # Pending evidence may contain private paths, commands or future resource
     # details. Unknown kinds are therefore summarized without echoing resource
     # or evidence fields until a dedicated privacy review exists.
