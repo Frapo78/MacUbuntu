@@ -98,13 +98,13 @@ class ExternalPendingRecoveryTests(unittest.TestCase):
         self.assertTrue(out["enabled"])
         self.assertFalse(out["active"])
 
-    def test_invalid_service_scope_does_not_echo_resource(self):
+    def test_path_like_service_resource_does_not_echo_private_path(self):
         out = _probe_pending_mutation(
             FakeRunner(),
             {
                 "id": "mutation-6",
                 "kind": "service_enable_start",
-                "resource": "system:/home/alice/private.service",
+                "resource": "user:/home/alice/private.service",
                 "evidence": {
                     "before_enabled": False,
                     "before_active": False,
@@ -116,7 +116,9 @@ class ExternalPendingRecoveryTests(unittest.TestCase):
         )
         rendered = str(out)
         self.assertEqual(out["status"], "unverifiable")
+        self.assertEqual(out["reason"], "invalid_pending_resource")
         self.assertNotIn("alice", rendered)
+        self.assertNotIn("resource", out)
 
 
 if __name__ == "__main__":
